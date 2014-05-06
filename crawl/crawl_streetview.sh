@@ -7,6 +7,7 @@ INTERVAL=10   #meters
 SIZE=640x640  #640x640 is maximum
 DIR=dir$1_$2
 TEMP_FILE=$DIR/.temp
+QUERY_INTERVAL=1 #sec
 
 #constants
 LAT_DPM="`echo "scale=6; 1/111133" | bc`" #y
@@ -77,6 +78,7 @@ do
 					echo "`date +"%D %r"`: sleep for a day"
 					`sleep $DAY_SEC`
 				fi
+				sleep $QUERY_INTERVAL
 			else
 				cnt="`echo "$cnt + 1" | bc`"
 			fi
