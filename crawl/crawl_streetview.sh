@@ -8,11 +8,13 @@ SIZE=640x640  #640x640 is maximum
 DIR=dir$1_$2
 TEMP_FILE=$DIR/.temp
 QUERY_INTERVAL=1 #sec
+RETRY_INTERVAL=10 #sec
 
 #constants
 LAT_DPM="`echo "scale=6; 1/111133" | bc`" #y
 LNG_DPM="`echo "scale=6; 1/93156" | bc`" #x
 DAY_SEC="`echo "24 * 3600" | bc`"
+OK_MSG="200 OK"
 
 ITER="`echo "($AREA / $INTERVAL) + 1" | bc`"
 ITER="`echo "$ITER * $ITER * 3" | bc`"
@@ -60,6 +62,7 @@ do
 done
 
 cnt=0
+progress=0
 for i in `seq 0 $INTERVAL $AREA`
 do
 	lat="`echo "scale=6; $1 + (($i - ($AREA / 2)) * $LAT_DPM)" | bc`"
@@ -69,16 +72,28 @@ do
 		for headling in {0..240..120}
 		do
 			if [ $cnt -ge $COMPLETED ];then
-				`wget "http://maps.googleapis.com/maps/api/streetview?size=$SIZE&location=$lat,$lng&heading=$headling&pitch=0&sensor=false&fov=120" -O "$DIR/sv_$lat$$_$lng$$_$headling.jpg"`
+				result=""
+				while true;
+				do
+					result="`wget "http://maps.googleapis.com/maps/api/streetview?size=$SIZE&location=$lat,$lng&heading=$headling&pitch=0&sensor=false&fov=120" -O "$DIR/sv_$lat$$_$lng$$_$headling.jpg" 2>&1`"
+
+					if [ `echo $result | grep -c "$OK_MSG"` -gt 0 ];then
+						sleep $QUERY_INTERVAL
+						break
+					else
+						echo "`date +"%D %T ($progress%,$cnt/$ITER): Retry after $RETRY_INTERVAL secs"`"
+						sleep $RETRY_INTERVAL
+					fi
+				done
+
 				cnt="`echo "$cnt + 1" | bc`"
 				echo "$cnt" > $TEMP_FILE
 				progress="`echo "scale=2; ($cnt * 100) / $ITER" | bc`"
 				echo "$progress%"
-				if [ `echo "$cnt % $LIMIT" | bc` -eq 0 ];then
-					echo "`date +"%D %r"`: sleep for a day"
-					`sleep $DAY_SEC`
-				fi
-				sleep $QUERY_INTERVAL
+#				if [ `echo "$cnt % $LIMIT" | bc` -eq 0 ];then
+#					echo "`date +"%D %r"`: sleep for a day"
+#					`sleep $DAY_SEC`
+#				fi
 			else
 				cnt="`echo "$cnt + 1" | bc`"
 			fi
