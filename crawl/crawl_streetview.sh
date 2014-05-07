@@ -1,13 +1,14 @@
 #!/bin/bash
 
 #config
-LIMIT=2400    #number of pictures
+LIMIT=25000    #number of pictures
 AREA=1000     #meters
 INTERVAL=10   #meters
 SIZE=640x640  #640x640 is maximum
 DIR=dir$1_$2
 TEMP_FILE=$DIR/.temp
-QUERY_INTERVAL=1 #sec
+KEY_FILE=key.txt
+QUERY_INTERVAL=0 #sec
 RETRY_INTERVAL=10 #sec
 
 #constants
@@ -40,14 +41,19 @@ fi
 echo "Download `echo "$ITER - $COMPLETED" | bc` streetview snapshots"
 echo "It will take `echo "($ITER - $COMPLETED) / $LIMIT" | bc` days"
 
+if [ -e $KEY_FILE ];then
+	echo "You have Google API Key"
+	KEY="`cat $KEY_FILE`"
+	KEY="&key=$KEY"
+else
+	echo "Warning: $KEY_FILE not found"
+	KEY=""
+fi
+
 #if [ $ITER -gt $LIMIT ]; then
 #	echo "Error: You can crawl at most $LIMIT pictures"
 #	exit
 #fi
-
-mkdir -p $DIR
-echo "Latitude: from $LAT_FROM to $LAT_TO" >> $DIR/README
-echo "Longitude: from $LNG_FROM to $LNG_TO" >> $DIR/README
 
 while true;
 do
@@ -60,6 +66,10 @@ do
 		exit
 	fi
 done
+
+mkdir -p $DIR
+echo "Latitude: from $LAT_FROM to $LAT_TO" >> $DIR/README
+echo "Longitude: from $LNG_FROM to $LNG_TO" >> $DIR/README
 
 cnt=0
 progress=0
@@ -75,7 +85,7 @@ do
 				result=""
 				while true;
 				do
-					result="`wget "http://maps.googleapis.com/maps/api/streetview?size=$SIZE&location=$lat,$lng&heading=$headling&pitch=0&sensor=false&fov=120" -O "$DIR/sv_$lat$$_$lng$$_$headling.jpg" 2>&1`"
+					result="`wget "http://maps.googleapis.com/maps/api/streetview?size=$SIZE&location=$lat,$lng&heading=$headling&pitch=0&sensor=false&fov=120$KEY" -O "$DIR/sv_$lat$$_$lng$$_$headling.jpg" 2>&1`"
 
 					if [ `echo $result | grep -c "$OK_MSG"` -gt 0 ];then
 						sleep $QUERY_INTERVAL
