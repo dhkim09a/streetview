@@ -1,4 +1,7 @@
 dir*
 *.o
-.*.sw*
+.*.swp
 *.elf
+.svn
+*.a
+*.so
