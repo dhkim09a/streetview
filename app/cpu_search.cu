@@ -46,6 +46,7 @@ int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 	iter = MIN(interim_size, (int)(*needle).size());
 	for (i = 0; i < iter; i++) {
 		for (j = 0; j < haystack_size; j++) {
+			dist = 0;
 			for (k = 0; k < VEC_DIM; k++) {
 				temp = (*needle)[i].descriptor[k] - haystack[j].vec[k];
 				dist += temp * temp;
@@ -54,6 +55,7 @@ int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 			if (dist < interim[i].dist_first) {
 				interim[i].lat_first = haystack[j].latitude;
 				interim[i].lng_first = haystack[j].longitude;
+				interim[i].dist_second = interim[i].dist_first;
 				interim[i].dist_first = dist;
 			}
 			else if (dist < interim[i].dist_second)
@@ -142,6 +144,7 @@ int CPUsearch (IpVec needle, ipoint_t *haystack, int haystack_size,
 			if (dist < interim.dist_first) {
 				interim.lat_first = args[j].interim[i].lat_first;
 				interim.lng_first = args[j].interim[i].lng_first;
+				interim.dist_second = interim.dist_first;
 				interim.dist_first = dist;
 			}
 			else if (dist < interim.dist_second)
