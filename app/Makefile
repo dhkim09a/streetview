@@ -20,7 +20,7 @@ COMMON_OBJ = main.o
 CPU_OBJ = cpu_search.o
 GPU_OBJ = gpu_search.o
 
-all: $(CPU_PROG)
+all: $(GPU_PROG)
 
 $(CPU_PROG): $(COMMON_OBJ) $(CPU_OBJ)
 	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))

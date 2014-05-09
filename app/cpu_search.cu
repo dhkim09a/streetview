@@ -12,13 +12,6 @@
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 */
-struct _interim {
-	double lat_first;
-	double lng_first;
-	float dist_first;
-	float dist_second;
-};
-
 typedef struct _arg_t {
 	IpVec *needle;
 	ipoint_t *haystack;
@@ -39,8 +32,8 @@ int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 	int iter;
 
 	for (i = 0; i < interim_size; i++) {
-		interim[i].dist_first = DBL_MAX;
-		interim[i].dist_second = DBL_MAX;
+		interim[i].dist_first = FLT_MAX;
+		interim[i].dist_second = FLT_MAX;
 	}
 
 	iter = MIN(interim_size, (int)(*needle).size());
@@ -136,8 +129,8 @@ int CPUsearch (IpVec needle, ipoint_t *haystack, int haystack_size,
 	fflush(stdout);
 
 	for (i = 0; i < (int)needle.size(); i++) {
-		interim.dist_first = DBL_MAX;
-		interim.dist_second = DBL_MAX;
+		interim.dist_first = FLT_MAX;
+		interim.dist_second = FLT_MAX;
 
 		for (j = 0; j < numcpu; j++) {
 			dist = args[j].interim[i].dist_first;

@@ -68,7 +68,9 @@ int main (int argc, char **argv)
 	}
 
 	if (status.st_size % sizeof(ipoint_t)) {
-		fprintf(stderr, "Database file might be corrupted\n");
+		fprintf(stderr, 
+				"Database file might be corrupted (file_size %% %lu != 0)\n",
+				sizeof(ipoint_t));
 		close(db);
 		exit(0);
 	}
@@ -149,10 +151,10 @@ int main (int argc, char **argv)
 	etc_ms = total_ms - surf_input_ms - load_db_ms - vec_match_ms;
 
 	printf("[Profile]\n"
-		   "SURF input image: %7lu ms (%5.2f %)\n"
-		   "Load database   : %7lu ms (%5.2f %)\n"
-		   "Vector searching: %7lu ms (%5.2f %)\n"
-		   "etc.            : %7lu ms (%5.2f %)\n"
+		   "SURF input image: %7lu ms (%5.2f %%)\n"
+		   "Load database   : %7lu ms (%5.2f %%)\n"
+		   "Vector searching: %7lu ms (%5.2f %%)\n"
+		   "etc.            : %7lu ms (%5.2f %%)\n"
 		   "Total           : %7lu ms\n",
 		   surf_input_ms, 100 * (float)surf_input_ms / (float)total_ms,
 		   load_db_ms, 100 * (float)load_db_ms / (float)total_ms,
@@ -162,7 +164,7 @@ int main (int argc, char **argv)
 #endif
 	printf("[Result] latitude longitude score\n");
 	for (i = 0; i < MIN(TOP, result.size()); i++)
-		printf("%lf %lf %d\n",
+		printf(FPF_T" "FPF_T" %d\n",
 			result[i].latitude, result[i].longitude, result[i].occurence);
 
 	return 0;
