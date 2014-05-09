@@ -9,7 +9,7 @@
 #include "surflib.h"
 
 #define SURF_THRESHOLD 0.0001f
-#define NAME_CONV "sv_%f_%f_%d.jpg"
+#define NAME_CONV "sv_%lf_%lf_%d.jpg"
 
 #define ADD_STR(dst, src)											\
 do{ char *temp;														\
@@ -36,7 +36,7 @@ int main (int argc, char **argv)
 	struct dirent *ent;
 	struct stat status;
 	char *file_path = NULL;
-	float latitude, longitude;
+	double latitude, longitude;
 	int headling;
 	int i, j, cnt = 0;
 	float avg_vec = 0;
