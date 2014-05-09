@@ -10,7 +10,7 @@
 
 #define NUMCPU 8
 #define SURF_THRESHOLD 0.0001f
-#define NAME_CONV "sv_%lf_%lf_%d.jpg"
+#define NAME_CONV "sv_"FPF_T"_"FPF_T"_%d.jpg"
 #define PATH_LEN 200
 
 #define ADD_STR(dst, src)											\
@@ -37,7 +37,7 @@ int doWork(char *input_dir_path, DIR *input_dir, FILE *output_file,
 	struct dirent *ent;
 	struct stat status;
 	char file_path[PATH_LEN];
-	double latitude, longitude;
+	FPF latitude, longitude;
 	int headling;
 	int i, j;
 
