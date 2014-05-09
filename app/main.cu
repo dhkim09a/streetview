@@ -29,6 +29,15 @@
 */
 int main (int argc, char **argv)
 {
+#ifdef PROFILE
+	struct timeval tv_from, tv_to;
+	struct timeval tv_total_from, tv_total_to;
+	unsigned long surf_input_ms = 0, load_db_ms = 0, vec_match_ms = 0;
+	unsigned long etc_ms = 0, total_ms = 0;
+
+	gettimeofday(&tv_total_from, NULL);
+#endif
+
 	if (argc != 3) {
 		printf("usage: %s [input image] [database file]\n", argv[0]);
 		exit(0);
@@ -70,8 +79,15 @@ int main (int argc, char **argv)
 		close(db);
 		exit(0);
 	}
-
+#ifdef PROFILE
+	gettimeofday(&tv_from, NULL);
+#endif
 	surfDetDes(input_img, input_ipts, false, 3, 4, 3, SURF_THRESHOLD);
+#ifdef PROFILE
+	gettimeofday(&tv_to, NULL);
+	surf_input_ms = (tv_to.tv_sec - tv_from.tv_sec) * 1000
+		+ (tv_to.tv_usec - tv_from.tv_usec) / 1000;
+#endif
 
 	cvReleaseImage(&input_img);
 
@@ -88,6 +104,9 @@ int main (int argc, char **argv)
 		if (haystack_size <= 0)
 			break;
 
+#ifdef PROFILE
+		gettimeofday(&tv_from, NULL);
+#endif
 		if (haystack == NULL)
 			haystack = (ipoint_t *)malloc(haystack_mem_size);
 
@@ -102,15 +121,46 @@ int main (int argc, char **argv)
 			printf("Read %lu / %lu bytes from DB\n",
 					status.st_size - db_left, status.st_size);
 		}
+#ifdef PROFILE
+	gettimeofday(&tv_to, NULL);
+	load_db_ms += (tv_to.tv_sec - tv_from.tv_sec) * 1000
+		+ (tv_to.tv_usec - tv_from.tv_usec) / 1000;
+#endif
 
 		printf("Finding %lu needles from haystack of %d\n",
 				input_ipts.size(), haystack_size);
+#ifdef PROFILE
+		gettimeofday(&tv_from, NULL);
+#endif
 		search(input_ipts, haystack, haystack_size, &result);
+#ifdef PROFILE
+	gettimeofday(&tv_to, NULL);
+	vec_match_ms += (tv_to.tv_sec - tv_from.tv_sec) * 1000
+		+ (tv_to.tv_usec - tv_from.tv_usec) / 1000;
+#endif
 	}
 
 	close(db);
 
-	printf("Result: [latitude] [longitude] [score]\n");
+#ifdef PROFILE
+	gettimeofday(&tv_total_to, NULL);
+	total_ms += (tv_total_to.tv_sec - tv_total_from.tv_sec) * 1000
+		+ (tv_total_to.tv_usec - tv_total_from.tv_usec) / 1000;
+	etc_ms = total_ms - surf_input_ms - load_db_ms - vec_match_ms;
+
+	printf("[Profile]\n"
+		   "SURF input image: %7lu ms (%5.2f %)\n"
+		   "Load database   : %7lu ms (%5.2f %)\n"
+		   "Vector searching: %7lu ms (%5.2f %)\n"
+		   "etc.            : %7lu ms (%5.2f %)\n"
+		   "Total           : %7lu ms\n",
+		   surf_input_ms, 100 * (float)surf_input_ms / (float)total_ms,
+		   load_db_ms, 100 * (float)load_db_ms / (float)total_ms,
+		   vec_match_ms, 100 * (float)vec_match_ms / (float)total_ms,
+		   etc_ms, 100 * (float)etc_ms / (float)total_ms,
+		   total_ms);
+#endif
+	printf("[Result] latitude longitude score\n");
 	for (i = 0; i < MIN(TOP, result.size()); i++)
 		printf("%lf %lf %d\n",
 			result[i].latitude, result[i].longitude, result[i].occurence);

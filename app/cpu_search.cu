@@ -130,6 +130,9 @@ int CPUsearch (IpVec needle, ipoint_t *haystack, int haystack_size,
 		}
 	}
 
+	printf("\n");
+	fflush(stdout);
+
 	for (i = 0; i < (int)needle.size(); i++) {
 		interim.dist_first = DBL_MAX;
 		interim.dist_second = DBL_MAX;
@@ -166,8 +169,6 @@ int CPUsearch (IpVec needle, ipoint_t *haystack, int haystack_size,
 		}
 	}
 
-	printf("Do final sorting\n");
-	fflush(stdout);
 	std::sort((*result_vec).begin(), (*result_vec).end(), comp_result);
 
 	for (i = 0; i < numcpu; i++)

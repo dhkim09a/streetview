@@ -3,7 +3,7 @@
 
 #include "surflib.h"
 
-#define MATCH_THRESH 0.80 /* 0.0 ~ 1.0 */
+#define MATCH_THRESH 1.0 /* 0.0 ~ 1.0 */
 #define MATCH_THRESH_SQUARE (MATCH_THRESH * MATCH_THRESH)
 
 #ifdef CUDA
