@@ -2,12 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <float.h>
-#include <cuda.h>
-#include <cuda_runtime_api.h>
 #include <pthread.h>
 #include <sys/time.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <vector>
 #include <cv.h>
 #include "surflib.h"
 
@@ -24,10 +23,10 @@
 #ifndef MEM_LIMIT
 #error Define MEM_LIMIT!
 #endif
-
+/*
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
-
+*/
 int main (int argc, char **argv)
 {
 	if (argc != 3) {
@@ -35,7 +34,7 @@ int main (int argc, char **argv)
 		exit(0);
 	}
 
-	int *db;
+	int db;
 	struct stat status;
 	ipoint_t *haystack = NULL;
 	int haystack_size; /* number of entries in haystack */
@@ -48,7 +47,7 @@ int main (int argc, char **argv)
 
 	int i;
 
-	if ((db = open(argv[2], "rb")) < 0) {
+	if ((db = open(argv[2], O_RDONLY)) < 0) {
 		fprintf(stderr, "Cannot open file, %s\n", argv[2]);
 		exit(0);
 	}
@@ -67,7 +66,7 @@ int main (int argc, char **argv)
 
 	/* SURF input image */
 	if (!(input_img = cvLoadImage(argv[1]))) {
-		fprintf(stderr, "Failed to load image, %s\n", file_path);
+		fprintf(stderr, "Failed to load image, %s\n", argv[1]);
 		close(db);
 		exit(0);
 	}
@@ -75,6 +74,9 @@ int main (int argc, char **argv)
 	surfDetDes(input_img, input_ipts, false, 3, 4, 3, SURF_THRESHOLD);
 
 	cvReleaseImage(&input_img);
+
+	printf("Extracted %lu interesting points from input image\n",
+			input_ipts.size());
 
 	/* Read DB and do searching */
 	db_left = status.st_size;
@@ -89,23 +91,28 @@ int main (int argc, char **argv)
 		if (haystack == NULL)
 			haystack = (ipoint_t *)malloc(haystack_mem_size);
 
-		if (read(fd, haystack, haystack_mem_size)
+		if (read(db, haystack, haystack_mem_size)
 				!= haystack_mem_size) {
 			fprintf(stderr, "Failed to read database file\n");
 			close(db);
 			exit(0);
 		}
-		else
+		else {
 			db_left -= haystack_mem_size;
+			printf("Read %lu / %lu bytes from DB\n",
+					status.st_size - db_left, status.st_size);
+		}
 
-		search(input_ipts, haystack, haystack_size, result);
+		printf("Finding %lu needles from haystack of %d\n",
+				input_ipts.size(), haystack_size);
+		search(input_ipts, haystack, haystack_size, &result);
 	}
 
 	close(db);
 
-	printf("Result: [latitude] [longitude] [score]\n"
+	printf("Result: [latitude] [longitude] [score]\n");
 	for (i = 0; i < MIN(TOP, result.size()); i++)
-		printf("%f %f %d\n",
+		printf("%lf %lf %d\n",
 			result[i].latitude, result[i].longitude, result[i].occurence);
 
 	return 0;
