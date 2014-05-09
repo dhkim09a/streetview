@@ -58,8 +58,8 @@ __global__ void doSearchKernel (ipoint_essence_t *needle, int needle_size,
 	return;
 }
 
-int GPUsearch (IpVec needle, ipoint_t *haystack, int haystack_size,
-		ResVec *result_vec)
+int search (IpVec needle, ipoint_t *haystack, int haystack_size,
+		ResVec *result_vec, int dummy)
 {
 	/* FIXME: We have to handle malloc() and cudaMalloc() failure */
 	unsigned int block_dim = 256;

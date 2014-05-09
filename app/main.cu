@@ -23,6 +23,11 @@
 #ifndef MEM_LIMIT
 #error Define MEM_LIMIT!
 #endif
+
+#ifndef NUMCPU
+#error Define NUMCPU as a positive value!
+#endif
+
 /*
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -134,7 +139,7 @@ int main (int argc, char **argv)
 #ifdef PROFILE
 		gettimeofday(&tv_from, NULL);
 #endif
-		search(input_ipts, haystack, haystack_size, &result);
+		search(input_ipts, haystack, haystack_size, &result, NUMCPU);
 #ifdef PROFILE
 	gettimeofday(&tv_to, NULL);
 	vec_match_ms += (tv_to.tv_sec - tv_from.tv_sec) * 1000

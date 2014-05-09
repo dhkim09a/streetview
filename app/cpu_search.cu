@@ -76,7 +76,7 @@ void *thread_main(void *arg)
 	return NULL;
 }
 
-int CPUsearch (IpVec needle, ipoint_t *haystack, int haystack_size,
+int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 		ResVec *result_vec, int numcpu)
 {
 	if (numcpu <= 0)

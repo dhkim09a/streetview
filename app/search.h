@@ -7,15 +7,9 @@
 #define MATCH_THRESH 1.0 /* 0.0 ~ 1.0 */
 #define MATCH_THRESH_SQUARE (MATCH_THRESH * MATCH_THRESH)
 
-#ifdef CUDA
-#define search(arg...) GPUsearch(arg)
-#else
 #ifndef NUMCPU
 #error Define NUMCPU as a positive value!
-#else
-#define search(arg...) CPUsearch(arg, NUMCPU)
 #endif /* NUMCPU */
-#endif /* CUDA */
 
 typedef struct _result_t {
 	FPF latitude;
@@ -37,12 +31,7 @@ struct _interim {
 	float dist_second __attribute__((aligned (sizeof(float))));
 } __attribute__((packed));
 
-#ifdef CUDA
-int GPUsearch (IpVec needle, ipoint_t *haystack, int haystack_size,
-		ResVec *result);
-#else
-int CPUsearch (IpVec needle, ipoint_t *haystack, int haystack_size,
+int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 		ResVec *result, int numcpu);
-#endif
 
 #endif /* __SEARCH_H_ */
