@@ -6,7 +6,7 @@ CC = g++
 PWD = `pwd`
 
 CFLAGS = -O2 -Wall -I../openSURF/src `pkg-config --cflags opencv`
-LDFLAGS = `pkg-config --libs opencv` ../openSURF/libsurf.so
+LDFLAGS = `pkg-config --libs opencv` ../openSURF/libsurf.so -lpthread
 
 OBJS = main.o
 
