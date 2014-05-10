@@ -4,11 +4,28 @@
 #include <float.h>
 #include <algorithm>
 #include <vector>
+#include <sys/time.h>
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 
 #include "db.h"
 #include "search.h"
+
+#ifdef PROFILE_CUDA
+#define PROFILE_FROM(tv_from) \
+	gettimeofday((tv_from), NULL)
+#define PROFILE_TO(tv_from, tv_to, time_ms) \
+do { \
+	gettimeofday(tv_to, NULL); \
+	time_ms = ((tv_to)->tv_sec - (tv_from)->tv_sec) * 1000 \
+		+ ((tv_to)->tv_usec - (tv_from)->tv_usec) / 1000; \
+} while (0)
+#else
+#define PROFILE_FROM(args...)
+#define PROFILE_TO(args...)
+#endif
+
+
 
 typedef struct _ipoint_essence_t {
 	float vec[VEC_DIM] __attribute__((aligned (4)));
@@ -58,6 +75,17 @@ __global__ void doSearchKernel (ipoint_essence_t *needle, int needle_size,
 int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 		ResVec *result_vec, int dummy)
 {
+#ifdef PROFILE_CUDA
+	struct timeval tv_from, tv_to;
+	struct timeval tv_total_from, tv_total_to;
+	unsigned long copy_needle_ms = 0, copy_haystack_ms = 0;
+	unsigned long run_kernel_ms = 0, copy_result_ms = 0;
+	unsigned long postprocessing_ms = 0;
+	unsigned long etc_ms = 0, total_ms = 0;
+
+	PROFILE_FROM(&tv_total_from);
+#endif
+
 	int i, j, found;
 	struct _interim interim;
 	result_t result;
@@ -73,12 +101,14 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 	unsigned int block_dim = needle_size;
 	unsigned int grid_dim = numcore;
 
-	/* Copy needle to device */
 	needle_essence_h = (ipoint_essence_t *)malloc(
 			needle_size * sizeof(ipoint_essence_t));
 	for (i = 0; i < needle_size; i++)
 		for (j = 0; j < VEC_DIM; j++)
 			needle_essence_h[i].vec[j] = needle[i].descriptor[j];
+
+	PROFILE_FROM(&tv_from);
+	/* Copy needle to device */
 	if (cudaMalloc((void **)&needle_essence_d,
 			needle_size * sizeof(ipoint_essence_t)) != cudaSuccess) {
 		fprintf(stderr, "cudaMalloc(needle_essence_d) failed\n");
@@ -91,7 +121,12 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 				"cudaMemcpy(needle_essence_d, needle_essence_h) failed\n");
 		return -1;
 	}
+#ifdef PROFILE_CUDA
+	cudaDeviceSynchronize();
+#endif
+	PROFILE_TO(&tv_from, &tv_to, copy_needle_ms);
 
+	PROFILE_FROM(&tv_from);
 	/* Copy haystack to device */
 	if (cudaMalloc((void **)&haystack_d,
 				haystack_size * sizeof(ipoint_t)) != cudaSuccess) {
@@ -104,6 +139,10 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 		fprintf(stderr, "cudaMemcpy(haystack_d, haystack) failed\n");
 		return -1;
 	}
+#ifdef PROFILE_CUDA
+	cudaDeviceSynchronize();
+#endif
+	PROFILE_TO(&tv_from, &tv_to, copy_haystack_ms);
 
 	/* Allocate memory for result
 	 * TODO: Still the result must be copied from device is about
@@ -116,10 +155,16 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 	interim_h = (struct _interim *)malloc(
 			numcore * sizeof(struct _interim) * needle_size);
 
+	PROFILE_FROM(&tv_from);
 	/* Run CUDA kernel */
 	doSearchKernel <<< grid_dim, block_dim >>> (needle_essence_d, needle_size,
 			haystack_d, haystack_size, interim_d, needle_size);
+#ifdef PROFILE_CUDA
+	cudaDeviceSynchronize();
+#endif
+	PROFILE_TO(&tv_from, &tv_to, run_kernel_ms);
 
+	PROFILE_FROM(&tv_from);
 	/* Copy result to host */
 	err = cudaMemcpy(interim_h, interim_d,
 			numcore * sizeof(struct _interim) * needle_size,
@@ -129,7 +174,12 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 				cudaGetErrorString(err));
 		return -1;
 	}
+#ifdef PROFILE_CUDA
+	cudaDeviceSynchronize();
+#endif
+	PROFILE_TO(&tv_from, &tv_to, copy_result_ms);
 
+	PROFILE_FROM(&tv_from);
 	for (i = 0; i < (int)needle_size; i++) {
 		interim.dist_first = FLT_MAX;
 		interim.dist_second = FLT_MAX;
@@ -169,6 +219,10 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 		}
 	}
 
+	std::sort((*result_vec).begin(), (*result_vec).end(), comp_result);
+
+	PROFILE_TO(&tv_from, &tv_to, postprocessing_ms);
+
 	free(needle_essence_h);
 	free(interim_h);
 
@@ -176,8 +230,29 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 	cudaFree(haystack_d);
 	cudaFree(interim_d);
 
-	std::sort((*result_vec).begin(), (*result_vec).end(), comp_result);
+#ifdef PROFILE_CUDA
+	PROFILE_TO(&tv_total_from, &tv_total_to, total_ms);
+	etc_ms = total_ms
+		- copy_needle_ms - copy_haystack_ms
+		- run_kernel_ms - copy_result_ms
+		- postprocessing_ms;
 
+	printf("[CUDA Profile]\n"
+		   "Copy needle to device  : %7lu ms (%5.2f %%)\n"
+		   "Copy haystack to device: %7lu ms (%5.2f %%)\n"
+		   "Run CUDA kernel        : %7lu ms (%5.2f %%)\n"
+		   "Copy result from device: %7lu ms (%5.2f %%)\n"
+		   "Post processing        : %7lu ms (%5.2f %%)\n"
+		   "etc.                   : %7lu ms (%5.2f %%)\n"
+		   "Total                  : %7lu ms\n",
+		   copy_needle_ms, 100 * (float)copy_needle_ms / (float)total_ms,
+		   copy_haystack_ms, 100 * (float)copy_haystack_ms / (float)total_ms,
+		   run_kernel_ms, 100 * (float)run_kernel_ms / (float)total_ms,
+		   copy_result_ms, 100 * (float)copy_result_ms / (float)total_ms,
+		   postprocessing_ms, 100 * (float)postprocessing_ms / (float)total_ms,
+		   etc_ms, 100 * (float)etc_ms / (float)total_ms,
+		   total_ms);
+#endif
 	return 0;
 }
 
