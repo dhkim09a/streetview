@@ -7,10 +7,6 @@
 #define MATCH_THRESH 1.0 /* 0.0 ~ 1.0 */
 #define MATCH_THRESH_SQUARE (MATCH_THRESH * MATCH_THRESH)
 
-#ifndef NUMCPU
-#error Define NUMCPU as a positive value!
-#endif /* NUMCPU */
-
 typedef struct _result_t {
 	FPF latitude;
 	FPF longitude;

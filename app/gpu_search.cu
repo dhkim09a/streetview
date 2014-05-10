@@ -18,42 +18,39 @@ __global__ void doSearchKernel (ipoint_essence_t *needle, int needle_size,
 		ipoint_t *haystack, int haystack_size,
 		struct _interim *interim, int interim_size_local)
 {
-	int id = (blockDim.x * blockIdx.x) + threadIdx.x;
-	int numcore = blockDim.x * gridDim.x;
-
-	if (id >= numcore)
+	if (threadIdx.x >= needle_size)
 		return;
 
-	ipoint_t *haystack_local = &(haystack[haystack_size / numcore * id]);
-	int haystack_size_local = MIN( haystack_size / numcore,
-			haystack_size - ((haystack_size / numcore) * id));
-	struct _interim *interim_local = &(interim[interim_size_local * id]);
+	ipoint_t *haystack_local =
+		&(haystack[haystack_size / gridDim.x * blockIdx.x]);
+	int haystack_size_local = MIN( haystack_size / gridDim.x,
+			haystack_size - ((haystack_size / gridDim.x) * blockIdx.x));
+	struct _interim *interim_local =
+		&(interim[interim_size_local * blockIdx.x]);
 
 	float dist, temp;
-	int i, j, k;
-	int iter;
+	int i, j;
 
-	for (i = 0; i < interim_size_local; i++) {
-		interim_local[i].dist_first = FLT_MAX;
-		interim_local[i].dist_second = FLT_MAX;
-	}
-	iter = MIN(interim_size_local, needle_size);
-	for (i = 0; i < iter; i++) {
-		for (j = 0; j < haystack_size_local; j++) {
-			dist = 0;
-			for (k = 0; k < VEC_DIM; k++) {
-				temp = needle[i].vec[k] - haystack_local[j].vec[k];
-				dist += temp * temp;
-			}
-			if (dist < interim_local[i].dist_first) {
-				interim_local[i].lat_first = haystack_local[j].latitude;
-				interim_local[i].lng_first = haystack_local[j].longitude;
-				interim_local[i].dist_second = interim_local[i].dist_first;
-				interim_local[i].dist_first = dist;
-			}
-			else if (dist < interim_local[i].dist_second)
-				interim_local[i].dist_second = dist;
+	interim_local[threadIdx.x].dist_first = FLT_MAX;
+	interim_local[threadIdx.x].dist_second = FLT_MAX;
+
+	for (i = 0; i < haystack_size_local; i++) {
+		dist = 0;
+		for (j = 0; j < VEC_DIM; j++) {
+			temp = needle[threadIdx.x].vec[j] - haystack_local[i].vec[j];
+			dist += temp * temp;
 		}
+		if (dist < interim_local[threadIdx.x].dist_first) {
+			interim_local[threadIdx.x].lat_first =
+				haystack_local[i].latitude;
+			interim_local[threadIdx.x].lng_first =
+				haystack_local[i].longitude;
+			interim_local[threadIdx.x].dist_second =
+				interim_local[threadIdx.x].dist_first;
+			interim_local[threadIdx.x].dist_first = dist;
+		}
+		else if (dist < interim_local[threadIdx.x].dist_second)
+			interim_local[threadIdx.x].dist_second = dist;
 	}
 	return;
 }
@@ -61,11 +58,6 @@ __global__ void doSearchKernel (ipoint_essence_t *needle, int needle_size,
 int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 		ResVec *result_vec, int dummy)
 {
-	/* FIXME: We have to handle malloc() and cudaMalloc() failure */
-	unsigned int block_dim = 256;
-	unsigned int grid_dim = 128;
-	int numcore = block_dim * grid_dim;
-
 	int i, j, found;
 	struct _interim interim;
 	result_t result;
@@ -76,6 +68,10 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 	struct _interim *interim_h, *interim_d;
 	int needle_size = needle.size();
 	cudaError_t err;
+
+	int numcore = 512;
+	unsigned int block_dim = needle_size;
+	unsigned int grid_dim = numcore;
 
 	/* Copy needle to device */
 	needle_essence_h = (ipoint_essence_t *)malloc(
