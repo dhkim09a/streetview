@@ -6,7 +6,7 @@ include config.mk
 CCBIN = gcc
 CC = nvcc -ccbin $(CCBIN)
 
-CFLAGS = -Wall -I../openSURF/src -I../dbmaker -g \
+CFLAGS = -O2 -Wall -I../openSURF/src -I../dbmaker -g \
 		 $(shell pkg-config --cflags opencv)
 LDFLAGS = $(shell pkg-config --libs opencv) \
 		  ../openSURF/libsurf.so
@@ -29,7 +29,7 @@ $(GPU_PROG): $(COMMON_OBJ) $(GPU_OBJ)
 	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
 
 %.o: %.cu
-	$(CC) $(addprefix -Xcompiler ,$(CFLAGS)) -c $<
+	$(CC) -O2 --use_fast_math $(addprefix -Xcompiler ,$(CFLAGS)) -c $<
 
 clean:
 	rm -f *.o
