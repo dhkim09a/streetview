@@ -38,37 +38,52 @@ __global__ void doSearchKernel (ipoint_essence_t *needle, int needle_size,
 	if (threadIdx.x >= needle_size)
 		return;
 
-	ipoint_t *haystack_local =
-		&(haystack[haystack_size / gridDim.x * blockIdx.x]);
-	int haystack_size_local = MIN( haystack_size / gridDim.x,
-			haystack_size - ((haystack_size / gridDim.x) * blockIdx.x));
-	struct _interim *interim_local =
-		&(interim[interim_size_local * blockIdx.x]);
-
 	float dist, temp;
 	int i, j;
 
-	interim_local[threadIdx.x].dist_first = FLT_MAX;
-	interim_local[threadIdx.x].dist_second = FLT_MAX;
+	struct _interim *interim_local =
+		&(interim[(interim_size_local * blockIdx.x) + threadIdx.x]);
+	int haystack_size_local = MIN( haystack_size / gridDim.x,
+			haystack_size - ((haystack_size / gridDim.x) * blockIdx.x));
 
+	/* Copy needle into local memory */
+	ipoint_essence_t needle_local;
+	for (i = 0; i < VEC_DIM; i++)
+		needle_local.vec[i] = needle[threadIdx.x].vec[i];
+
+	/* Copy haystack into shared memory */
+	extern __shared__ ipoint_t haystack_shared[];
+	if (threadIdx.x == 0)
+		for (i = 0; i < haystack_size_local; i++)
+			haystack_shared[i] =
+				haystack[haystack_size / gridDim.x * blockIdx.x + i];
+
+	/* NOTE: This CUDA kernel is fast enough, finishes job under 1 ms, however,
+	   you may be able to boost up by moving 'interim' into shared memory */
+
+	__syncthreads();
+
+	interim_local->dist_first = FLT_MAX;
+	interim_local->dist_second = FLT_MAX;
 	for (i = 0; i < haystack_size_local; i++) {
 		dist = 0;
 		for (j = 0; j < VEC_DIM; j++) {
-			temp = needle[threadIdx.x].vec[j] - haystack_local[i].vec[j];
+			temp = needle_local.vec[j] - haystack_shared[i].vec[j];
 			dist += temp * temp;
 		}
-		if (dist < interim_local[threadIdx.x].dist_first) {
-			interim_local[threadIdx.x].lat_first =
-				haystack_local[i].latitude;
-			interim_local[threadIdx.x].lng_first =
-				haystack_local[i].longitude;
-			interim_local[threadIdx.x].dist_second =
-				interim_local[threadIdx.x].dist_first;
-			interim_local[threadIdx.x].dist_first = dist;
+		if (dist < interim_local->dist_first) {
+			interim_local->lat_first =
+				haystack_shared[i].latitude;
+			interim_local->lng_first =
+				haystack_shared[i].longitude;
+			interim_local->dist_second =
+				interim_local->dist_first;
+			interim_local->dist_first = dist;
 		}
-		else if (dist < interim_local[threadIdx.x].dist_second)
-			interim_local[threadIdx.x].dist_second = dist;
+		else if (dist < interim_local->dist_second)
+			interim_local->dist_second = dist;
 	}
+
 	return;
 }
 
@@ -157,7 +172,8 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 
 	PROFILE_FROM(&tv_from);
 	/* Run CUDA kernel */
-	doSearchKernel <<< grid_dim, block_dim >>> (needle_essence_d, needle_size,
+	doSearchKernel <<< grid_dim, block_dim, sizeof(ipoint_t) * haystack_size >>>
+		(needle_essence_d, needle_size,
 			haystack_d, haystack_size, interim_d, needle_size);
 #ifdef PROFILE_CUDA
 	cudaDeviceSynchronize();
