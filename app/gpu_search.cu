@@ -93,6 +93,7 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 #ifdef PROFILE_CUDA
 	struct timeval tv_from, tv_to;
 	struct timeval tv_total_from, tv_total_to;
+	unsigned long init_device_ms = 0;
 	unsigned long copy_needle_ms = 0, copy_haystack_ms = 0;
 	unsigned long run_kernel_ms = 0, copy_result_ms = 0;
 	unsigned long postprocessing_ms = 0;
@@ -115,6 +116,12 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 	int numcore = 512;
 	unsigned int block_dim = needle_size;
 	unsigned int grid_dim = numcore;
+
+	PROFILE_FROM(&tv_from);
+#ifdef PROFILE_CUDA
+	cudaDeviceSynchronize();
+#endif
+	PROFILE_TO(&tv_from, &tv_to, init_device_ms);
 
 	needle_essence_h = (ipoint_essence_t *)malloc(
 			needle_size * sizeof(ipoint_essence_t));
@@ -249,11 +256,13 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 #ifdef PROFILE_CUDA
 	PROFILE_TO(&tv_total_from, &tv_total_to, total_ms);
 	etc_ms = total_ms
+		- init_device_ms
 		- copy_needle_ms - copy_haystack_ms
 		- run_kernel_ms - copy_result_ms
 		- postprocessing_ms;
 
 	printf("[CUDA Profile]\n"
+		   "Initialize device      : %7lu ms (%5.2f %%)\n"
 		   "Copy needle to device  : %7lu ms (%5.2f %%)\n"
 		   "Copy haystack to device: %7lu ms (%5.2f %%)\n"
 		   "Run CUDA kernel        : %7lu ms (%5.2f %%)\n"
@@ -261,6 +270,7 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 		   "Post processing        : %7lu ms (%5.2f %%)\n"
 		   "etc.                   : %7lu ms (%5.2f %%)\n"
 		   "Total                  : %7lu ms\n",
+		   init_device_ms, 100 * (float)init_device_ms / (float)total_ms,
 		   copy_needle_ms, 100 * (float)copy_needle_ms / (float)total_ms,
 		   copy_haystack_ms, 100 * (float)copy_haystack_ms / (float)total_ms,
 		   run_kernel_ms, 100 * (float)run_kernel_ms / (float)total_ms,
