@@ -28,7 +28,7 @@ int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 		struct _interim *interim, int interim_size)
 {
 	float dist, temp;
-	int i, j, k;
+	int i, j, k, l;
 	int iter;
 
 	for (i = 0; i < interim_size; i++) {
@@ -37,25 +37,28 @@ int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 	}
 
 	iter = MIN(interim_size, (int)(*needle).size());
-	for (i = 0; i < iter; i++) {
+	int batch = MIN(100, iter);
+	for (l = 0; l < (iter / batch); l++) {
 		for (j = 0; j < haystack_size; j++) {
-			dist = 0;
-			for (k = 0; k < VEC_DIM; k++) {
-				temp = (*needle)[i].descriptor[k] - haystack[j].vec[k];
-				dist += temp * temp;
-			}
+			for (i = l * batch; (i < iter) && (i < (l+1) * batch); i++) {
+				dist = 0;
+				for (k = 0; k < VEC_DIM; k++) {
+					temp = (*needle)[i].descriptor[k] - haystack[j].vec[k];
+					dist += temp * temp;
+				}
 
-			if (dist < interim[i].dist_first) {
-				interim[i].lat_first = haystack[j].latitude;
-				interim[i].lng_first = haystack[j].longitude;
-				interim[i].dist_second = interim[i].dist_first;
-				interim[i].dist_first = dist;
+				if (dist < interim[i].dist_first) {
+					interim[i].lat_first = haystack[j].latitude;
+					interim[i].lng_first = haystack[j].longitude;
+					interim[i].dist_second = interim[i].dist_first;
+					interim[i].dist_first = dist;
+				}
+				else if (dist < interim[i].dist_second)
+					interim[i].dist_second = dist;
 			}
-			else if (dist < interim[i].dist_second)
-				interim[i].dist_second = dist;
+			//		printf("\33[2K\r%d/%d", i+1, iter);
+			//		fflush(stdout);
 		}
-		printf("\33[2K\r%d/%d", i+1, iter);
-		fflush(stdout);
 	}
 
 	return 0;
