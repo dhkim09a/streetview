@@ -13,9 +13,14 @@
 
 #ifdef PROFILE_CUDA
 #define PROFILE_FROM(tv_from) \
-	gettimeofday((tv_from), NULL)
+do { \
+	__sync_synchronize(); \
+	gettimeofday((tv_from), NULL); \
+} while (0)
+
 #define PROFILE_TO(tv_from, tv_to, time_ms) \
 do { \
+	__sync_synchronize(); \
 	gettimeofday(tv_to, NULL); \
 	time_ms = ((tv_to)->tv_sec - (tv_from)->tv_sec) * 1000 \
 		+ ((tv_to)->tv_usec - (tv_from)->tv_usec) / 1000; \
