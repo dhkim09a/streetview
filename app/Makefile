@@ -8,6 +8,7 @@ CC = nvcc -ccbin $(CCBIN)
 
 CFLAGS = -O2 -Wall -I../openSURF/src -I../dbmaker -g \
 		 $(shell pkg-config --cflags opencv)
+CFLAGS += -Wno-unused-function
 LDFLAGS = $(shell pkg-config --libs opencv) \
 		  ../openSURF/libsurf.so
 
@@ -30,6 +31,9 @@ $(GPU_PROG): $(COMMON_OBJ) $(GPU_OBJ)
 
 %.o: %.cu
 	$(CC) -O2 --use_fast_math $(addprefix -Xcompiler ,$(CFLAGS)) -c $<
+
+%.o: %.cpp
+	$(CCBIN) -mavx $(CFLAGS) -c $<
 
 clean:
 	rm -f *.o
