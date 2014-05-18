@@ -54,12 +54,14 @@ int main (int argc, char **argv)
 	int haystack_size; /* number of entries in haystack */
 	size_t haystack_mem_size;
 	size_t db_left;
-	ResVec result;
+	struct _interim *result;
+	result_t answer;
+	ResVec answer_vec;
 
 	IplImage *input_img;
 	IpVec input_ipts;
 
-	int i;
+	int i, j, found;
 
 	if ((db = open(argv[2], O_RDONLY)) < 0) {
 		fprintf(stderr, "Cannot open file, %s\n", argv[2]);
@@ -101,6 +103,15 @@ int main (int argc, char **argv)
 	printf("Extracted %lu interesting points from input image\n",
 			input_ipts.size());
 
+	result = (struct _interim *)malloc(
+			input_ipts.size() * sizeof(struct _interim));
+	for (i = 0; i < (int)input_ipts.size(); i++) {
+		result[i].dist_first = FLT_MAX;
+		result[i].dist_second = FLT_MAX;
+		result[i].lat_first = 0;
+		result[i].lng_first = 0;
+	}
+
 	/* Read DB and do searching */
 	db_left = status.st_size;
 
@@ -129,9 +140,9 @@ int main (int argc, char **argv)
 					status.st_size - db_left, status.st_size);
 		}
 #ifdef PROFILE
-	gettimeofday(&tv_to, NULL);
-	load_db_ms += (tv_to.tv_sec - tv_from.tv_sec) * 1000
-		+ (tv_to.tv_usec - tv_from.tv_usec) / 1000;
+		gettimeofday(&tv_to, NULL);
+		load_db_ms += (tv_to.tv_sec - tv_from.tv_sec) * 1000
+			+ (tv_to.tv_usec - tv_from.tv_usec) / 1000;
 #endif
 
 		printf("Finding %lu needles from haystack of %d\n",
@@ -139,15 +150,39 @@ int main (int argc, char **argv)
 #ifdef PROFILE
 		gettimeofday(&tv_from, NULL);
 #endif
-		search(input_ipts, haystack, haystack_size, &result, NUMCPU);
+		search(input_ipts, haystack, haystack_size, result, input_ipts.size(),
+				NUMCPU);
 #ifdef PROFILE
-	gettimeofday(&tv_to, NULL);
-	vec_match_ms += (tv_to.tv_sec - tv_from.tv_sec) * 1000
-		+ (tv_to.tv_usec - tv_from.tv_usec) / 1000;
+		gettimeofday(&tv_to, NULL);
+		vec_match_ms += (tv_to.tv_sec - tv_from.tv_sec) * 1000
+			+ (tv_to.tv_usec - tv_from.tv_usec) / 1000;
 #endif
 	}
 
 	close(db);
+
+	for (i = 0; i < (int)input_ipts.size(); i++) {
+		if (result[i].dist_first / result[i].dist_second < MATCH_THRESH_SQUARE){
+			found = -1;
+			for (j = 0; j < (int)answer_vec.size(); j++) {
+				if (answer_vec[j].latitude == result[i].lat_first
+						&& answer_vec[j].longitude == result[i].lng_first) {
+					answer_vec[j].occurence++;
+					found = 1;
+					break;
+				}
+			}
+
+			if (found < 0) {
+				answer.latitude = result[i].lat_first;
+				answer.longitude = result[i].lng_first;
+				answer.occurence = 1;
+
+				answer_vec.push_back(answer);
+			}
+		}
+	}
+	std::sort(answer_vec.begin(), answer_vec.end(), comp_result);
 
 #ifdef PROFILE
 	gettimeofday(&tv_total_to, NULL);
@@ -168,9 +203,10 @@ int main (int argc, char **argv)
 		   total_ms);
 #endif
 	printf("[Result] latitude longitude score\n");
-	for (i = 0; i < MIN(TOP, result.size()); i++)
+	for (i = 0; i < MIN(TOP, answer_vec.size()); i++)
 		printf(FPF_T" "FPF_T" %d\n",
-			result[i].latitude, result[i].longitude, result[i].occurence);
+			answer_vec[i].latitude, answer_vec[i].longitude,
+			answer_vec[i].occurence);
 
 	return 0;
 }

@@ -21,13 +21,13 @@ static bool comp_result (result_t i, result_t j)
 }
 
 struct _interim {
-	FPF lat_first __attribute__((aligned (sizeof(FPF))));
-	FPF lng_first __attribute__((aligned (sizeof(FPF))));
-	float dist_first __attribute__((aligned (sizeof(float))));
-	float dist_second __attribute__((aligned (sizeof(float))));
+	FPF lat_first __attribute__((aligned (4)));
+	FPF lng_first __attribute__((aligned (4)));
+	float dist_first __attribute__((aligned (4)));
+	float dist_second __attribute__((aligned (4)));
 } __attribute__((packed));
 
 int search (IpVec needle, ipoint_t *haystack, int haystack_size,
-		ResVec *result, int numcpu);
+		struct _interim *result, int result_size, int numcpu);
 
 #endif /* __SEARCH_H_ */

@@ -115,8 +115,6 @@ int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 				else if (dist < interim[i].dist_second)
 					interim[i].dist_second = dist;
 			}
-			//		printf("\33[2K\r%d/%d", i+1, iter);
-			//		fflush(stdout);
 		}
 	}
 
@@ -139,17 +137,15 @@ void *thread_main(void *arg)
 }
 
 int search (IpVec needle, ipoint_t *haystack, int haystack_size,
-		ResVec *result_vec, int numcpu)
+		struct _interim *result, int result_size, int numcpu)
 {
 	if (numcpu <= 0)
 		return -1;
 
 	pthread_t *threads = (pthread_t *)malloc(numcpu * sizeof(pthread_t));
 	arg_t *args = (arg_t *)malloc(numcpu * sizeof(arg_t));
-	int i, j, found, err;
+	int i, j, err, iter;
 	int status;
-	struct _interim interim;
-	result_t result;
 	float dist;
 
 	int running = numcpu;
@@ -187,49 +183,20 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 		}
 	}
 
-	printf("\n");
-	fflush(stdout);
-
-	for (i = 0; i < (int)needle.size(); i++) {
-		interim.dist_first = FLT_MAX;
-		interim.dist_second = FLT_MAX;
-		interim.lat_first = 0;
-		interim.lng_first = 0;
-
-		for (j = 0; j < numcpu; j++) {
+	iter = MIN((int)needle.size(), result_size);
+	for (j = 0; j < numcpu; j++) {
+		for (i = 0; i < iter; i++) {
 			dist = args[j].interim[i].dist_first;
-			if (dist < interim.dist_first) {
-				interim.lat_first = args[j].interim[i].lat_first;
-				interim.lng_first = args[j].interim[i].lng_first;
-				interim.dist_second = interim.dist_first;
-				interim.dist_first = dist;
+			if (dist < result[i].dist_first) {
+				result[i].lat_first = args[j].interim[i].lat_first;
+				result[i].lng_first = args[j].interim[i].lng_first;
+				result[i].dist_second = result[i].dist_first;
+				result[i].dist_first = dist;
 			}
-			else if (dist < interim.dist_second)
-				interim.dist_second = dist;
-		}
-
-		if (interim.dist_first / interim.dist_second < MATCH_THRESH_SQUARE) {
-			found = -1;
-			for (j = 0; j < (int)(*result_vec).size(); j++) {
-				if ((*result_vec)[j].latitude == interim.lat_first
-						&& (*result_vec)[j].longitude == interim.lng_first) {
-					(*result_vec)[j].occurence++;
-					found = 1;
-					break;
-				}
-			}
-
-			if (found < 0) {
-				result.latitude = interim.lat_first;
-				result.longitude = interim.lng_first;
-				result.occurence = 1;
-
-				(*result_vec).push_back(result);
-			}
+			else if (dist < result[i].dist_second)
+				result[i].dist_second = dist;
 		}
 	}
-
-	std::sort((*result_vec).begin(), (*result_vec).end(), comp_result);
 
 	for (i = 0; i < numcpu; i++)
 		free(args[i].interim);
@@ -238,4 +205,3 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 
 	return 0;
 }
-

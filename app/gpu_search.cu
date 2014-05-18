@@ -109,7 +109,7 @@ __global__ void doSearchKernel (int shared_mem_size,
 }
 
 int search (IpVec needle, ipoint_t *haystack, int haystack_size,
-		ResVec *result_vec, int dummy)
+		struct _interim *result, int result_size, int dummy)
 {
 #ifdef PROFILE_CUDA
 	struct timeval tv_from, tv_to;
@@ -123,9 +123,7 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 	PROFILE_FROM(&tv_total_from);
 #endif
 
-	int i, j, found;
-	struct _interim interim;
-	result_t result;
+	int i, j, iter;
 	float dist;
 
 	ipoint_essence_t *needle_essence_h, *needle_essence_d;
@@ -230,49 +228,22 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 	PROFILE_TO(&tv_from, &tv_to, copy_result_ms);
 
 	PROFILE_FROM(&tv_from);
-	for (i = 0; i < (int)needle_size; i++) {
-		interim.dist_first = FLT_MAX;
-		interim.dist_second = FLT_MAX;
-		interim.lat_first = 0;
-		interim.lng_first = 0;
-
+	iter = MIN((int)needle.size(), result_size);
+	for (i = 0; i < iter; i++) {
 		for (j = 0; j < numcore; j++) {
 			dist = interim_h[(j * needle_size) + i].dist_first;
-			if (dist < interim.dist_first) {
-				interim.lat_first =
+			if (dist < result[i].dist_first) {
+				result[i].lat_first =
 					interim_h[(j * needle_size) + i].lat_first;
-				interim.lng_first =
+				result[i].lng_first =
 					interim_h[(j * needle_size) + i].lng_first;
-				interim.dist_second = interim.dist_first;
-				interim.dist_first = dist;
+				result[i].dist_second = result[i].dist_first;
+				result[i].dist_first = dist;
 			}
-			else if (dist < interim.dist_second)
-				interim.dist_second = dist;
-		}
-
-		if (interim.dist_first / interim.dist_second < MATCH_THRESH_SQUARE) {
-			found = -1;
-			for (j = 0; j < (int)(*result_vec).size(); j++) {
-				if ((*result_vec)[j].latitude == interim.lat_first
-						&& (*result_vec)[j].longitude == interim.lng_first) {
-					(*result_vec)[j].occurence++;
-					found = 1;
-					break;
-				}
-			}
-
-			if (found < 0) {
-				result.latitude = interim.lat_first;
-				result.longitude = interim.lng_first;
-				result.occurence = 1;
-
-				(*result_vec).push_back(result);
-			}
+			else if (dist < result[i].dist_second)
+				result[i].dist_second = dist;
 		}
 	}
-
-	std::sort((*result_vec).begin(), (*result_vec).end(), comp_result);
-
 	PROFILE_TO(&tv_from, &tv_to, postprocessing_ms);
 
 	free(needle_essence_h);
@@ -310,4 +281,3 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 #endif
 	return 0;
 }
-
