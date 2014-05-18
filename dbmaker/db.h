@@ -15,9 +15,9 @@
 #endif
 
 typedef struct _ipoint_t {
-	FPF latitude __attribute__((aligned (sizeof(FPF))));
-	FPF longitude __attribute__((aligned (sizeof(FPF))));
-	float vec[VEC_DIM] __attribute__((aligned (sizeof(float))));
+	FPF latitude __attribute__((aligned (4)));
+	FPF longitude __attribute__((aligned (4)));
+	float vec[VEC_DIM] __attribute__((aligned (4)));
 } __attribute__((packed)) ipoint_t;
 
 #endif /* __DB_H_ */
