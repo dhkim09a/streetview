@@ -4,7 +4,10 @@
 #include "surflib.h"
 #include "db.h"
 
-#define MATCH_THRESH 1.0 /* 0.0 ~ 1.0 */
+#ifndef MATCH_THRESH
+#error Define MATCH_THRESH!
+#endif
+
 #define MATCH_THRESH_SQUARE (MATCH_THRESH * MATCH_THRESH)
 
 typedef struct _result_t {
