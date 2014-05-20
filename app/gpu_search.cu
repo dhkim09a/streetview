@@ -68,7 +68,7 @@ __global__ void doSearchKernel (int shared_mem_size,
 	extern __shared__ ipoint_t haystack_shared[];
 	batch = shared_mem_size / sizeof(ipoint_t);
 	int iter;
-	for (k = 0; k < (haystack_size_local / batch + 1); k++) {
+	for (k = 0; k < (haystack_size_local / batch); k++) {
 
 		iter = ((k + 1) * batch) > haystack_size_local ?
 			(haystack_size_local % batch) : batch;
@@ -196,6 +196,11 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	if (cudaMalloc((void **)&interim_d,
 			grid_dim * sizeof(struct _interim) * needle_size) != cudaSuccess) {
 		fprintf(stderr, "cudaMalloc(interim_d) failed\n");
+		return -1;
+	}
+	if (cudaMemset(interim_d, 0,
+				grid_dim * sizeof(struct _interim) * needle_size) != cudaSuccess) {
+		fprintf(stderr, "cudaMemset(interim_d) failed\n");
 		return -1;
 	}
 	interim_h = (struct _interim *)malloc(
