@@ -134,10 +134,6 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	int needle_size = needle.size();
 	cudaError_t err;
 
-	int numcore = 128;
-	unsigned int block_dim = needle_size;
-	unsigned int grid_dim = numcore;
-
 	PROFILE_FROM(&tv_from);
 #ifdef PROFILE_CUDA
 	cudaDeviceSynchronize();
@@ -147,6 +143,9 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	cudaSetDevice(DEV_ID);
 	cudaDeviceProp device_prop;
 	cudaGetDeviceProperties(&device_prop, DEV_ID);
+
+	unsigned int block_dim = needle_size;
+	unsigned int grid_dim = (unsigned int)device_prop.multiProcessorCount;
 
 	needle_essence_h = (ipoint_essence_t *)malloc(
 			needle_size * sizeof(ipoint_essence_t));
@@ -195,12 +194,12 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	 * TODO: Still the result must be copied from device is about
 	 * hundreads of MB. Need to reduce them. */
 	if (cudaMalloc((void **)&interim_d,
-			numcore * sizeof(struct _interim) * needle_size) != cudaSuccess) {
+			grid_dim * sizeof(struct _interim) * needle_size) != cudaSuccess) {
 		fprintf(stderr, "cudaMalloc(interim_d) failed\n");
 		return -1;
 	}
 	interim_h = (struct _interim *)malloc(
-			numcore * sizeof(struct _interim) * needle_size);
+			grid_dim * sizeof(struct _interim) * needle_size);
 
 	PROFILE_FROM(&tv_from);
 	/* Run CUDA kernel */
@@ -217,7 +216,7 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	PROFILE_FROM(&tv_from);
 	/* Copy result to host */
 	err = cudaMemcpy(interim_h, interim_d,
-			numcore * sizeof(struct _interim) * needle_size,
+			grid_dim * sizeof(struct _interim) * needle_size,
 			cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) {
 		fprintf(stderr, "cudaMemcpy(interim_h, interim_d): %s\n",
@@ -232,7 +231,7 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	PROFILE_FROM(&tv_from);
 	iter = MIN((int)needle.size(), result_size);
 	for (i = 0; i < iter; i++) {
-		for (j = 0; j < numcore; j++) {
+		for (j = 0; j < (int)grid_dim; j++) {
 			dist = interim_h[(j * needle_size) + i].dist_first;
 			if (dist < result[i].dist_first) {
 				result[i].lat_first =
