@@ -136,7 +136,7 @@ void *thread_main(void *arg)
 	return NULL;
 }
 
-int search (IpVec needle, ipoint_t *haystack, int haystack_size,
+int searchCPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 		struct _interim *result, int result_size, int numcpu)
 {
 	if (numcpu <= 0)

@@ -48,11 +48,13 @@ __global__ void doSearchKernel (int shared_mem_size,
 
 	float dist, temp;
 	int i, j, k;
+	int batch;
 
 	struct _interim *interim_local =
 		&(interim[(interim_size_local * blockIdx.x) + threadIdx.x]);
-	int haystack_size_local = MIN( haystack_size / gridDim.x,
-			haystack_size - ((haystack_size / gridDim.x) * blockIdx.x));
+	batch = haystack_size / gridDim.x;
+	int haystack_size_local = ((blockIdx.x + 1) * batch) > haystack_size ?
+		(haystack_size % batch) : batch;
 
 	/* Copy needle into local memory */
 	ipoint_essence_t needle_local;
@@ -64,7 +66,7 @@ __global__ void doSearchKernel (int shared_mem_size,
 	interim_temp.dist_second = FLT_MAX;
 
 	extern __shared__ ipoint_t haystack_shared[];
-	int batch = shared_mem_size / sizeof(ipoint_t);
+	batch = shared_mem_size / sizeof(ipoint_t);
 	int iter;
 	for (k = 0; k < (haystack_size_local / batch + 1); k++) {
 
@@ -108,7 +110,7 @@ __global__ void doSearchKernel (int shared_mem_size,
 	return;
 }
 
-int search (IpVec needle, ipoint_t *haystack, int haystack_size,
+int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 		struct _interim *result, int result_size, int dummy)
 {
 #ifdef PROFILE_CUDA
@@ -136,15 +138,15 @@ int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 	unsigned int block_dim = needle_size;
 	unsigned int grid_dim = numcore;
 
-	cudaSetDevice(DEV_ID);
-	cudaDeviceProp device_prop;
-	cudaGetDeviceProperties(&device_prop, DEV_ID);
-
 	PROFILE_FROM(&tv_from);
 #ifdef PROFILE_CUDA
 	cudaDeviceSynchronize();
 #endif
 	PROFILE_TO(&tv_from, &tv_to, init_device_ms);
+
+	cudaSetDevice(DEV_ID);
+	cudaDeviceProp device_prop;
+	cudaGetDeviceProperties(&device_prop, DEV_ID);
 
 	needle_essence_h = (ipoint_essence_t *)malloc(
 			needle_size * sizeof(ipoint_essence_t));

@@ -27,7 +27,4 @@ struct _interim {
 	float dist_second __attribute__((aligned (4)));
 } __attribute__((packed));
 
-int search (IpVec needle, ipoint_t *haystack, int haystack_size,
-		struct _interim *result, int result_size, int numcpu);
-
 #endif /* __SEARCH_H_ */

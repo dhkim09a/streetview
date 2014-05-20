@@ -28,6 +28,13 @@
 #error Define NUMCPU as a positive value!
 #endif
 
+#ifndef shared
+#error Define shared()!
+#endif
+
+extern int search (IpVec needle, ipoint_t *haystack, int haystack_size,
+		struct _interim *result, int result_size, int numcpu);
+
 /*
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))

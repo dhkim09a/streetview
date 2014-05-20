@@ -14,19 +14,29 @@ LDFLAGS = $(shell pkg-config --libs opencv) \
 
 CFLAGS += $(addprefix -D,$(CONFIG))
 
+CFLAG_CPU = -Dsearch=searchCPU
+CFLAG_GPU = -Dsearch=searchGPU
+CFLAG_HYB = -Dsearch=searchHyb
+
 CPU_PROG = cpu.elf
 GPU_PROG = gpu.elf
+HYB_PROG = hyb.elf
 
-COMMON_OBJ = main.o
+SHARED_OBJ = main.o
 CPU_OBJ = cpu_search.o
 GPU_OBJ = gpu_search.o
+HYB_OBJ = hyb_search.o $(CPU_OBJ) $(GPU_OBJ)
 
-all: $(CPU_PROG) $(GPU_PROG)
 
-$(CPU_PROG): $(COMMON_OBJ) $(CPU_OBJ)
+all: $(HYB_PROG) $(CPU_PROG) $(GPU_PROG)
+
+$(CPU_PROG): $(addprefix cpu_,$(SHARED_OBJ)) $(CPU_OBJ)
 	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
 
-$(GPU_PROG): $(COMMON_OBJ) $(GPU_OBJ)
+$(GPU_PROG): $(addprefix gpu_,$(SHARED_OBJ)) $(GPU_OBJ)
+	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
+
+$(HYB_PROG): $(addprefix hyb_,$(SHARED_OBJ)) $(HYB_OBJ)
 	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
 
 %.o: %.cu
@@ -35,6 +45,16 @@ $(GPU_PROG): $(COMMON_OBJ) $(GPU_OBJ)
 %.o: %.cpp
 	$(CCBIN) -mavx $(CFLAGS) -c $<
 
+$(addprefix cpu_,$(SHARED_OBJ)): $(addsuffix .cpp, $(basename $(SHARED_OBJ)))
+	$(CCBIN) -mavx $(CFLAG_CPU) $(CFLAGS) -c $< -o $@
+
+$(addprefix gpu_,$(SHARED_OBJ)): $(addsuffix .cpp, $(basename $(SHARED_OBJ)))
+	$(CCBIN) -mavx $(CFLAG_GPU) $(CFLAGS) -c $< -o $@
+
+$(addprefix hyb_,$(SHARED_OBJ)): $(addsuffix .cpp, $(basename $(SHARED_OBJ)))
+	$(CCBIN) -mavx $(CFLAG_HYB) $(CFLAGS) -c $< -o $@
+
 clean:
 	rm -f *.o
 	rm -f $(CPU_PROG) $(GPU_PROG)
+
