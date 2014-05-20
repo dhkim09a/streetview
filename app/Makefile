@@ -1,7 +1,9 @@
 
 .PHONY: all clean
 
-include config.mk
+CONFIG_MK = config.mk
+
+include $(CONFIG_MK)
 
 CCBIN = gcc
 CC = nvcc -ccbin $(CCBIN)
@@ -27,16 +29,19 @@ CPU_OBJ = cpu_search.o
 GPU_OBJ = gpu_search.o
 HYB_OBJ = hyb_search.o $(CPU_OBJ) $(GPU_OBJ)
 
+CPU_SHARED_OBJ = $(addprefix cpu_,$(SHARED_OBJ))
+GPU_SHARED_OBJ = $(addprefix gpu_,$(SHARED_OBJ))
+HYB_SHARED_OBJ = $(addprefix hyb_,$(SHARED_OBJ))
 
 all: $(HYB_PROG) $(CPU_PROG) $(GPU_PROG)
 
-$(CPU_PROG): $(addprefix cpu_,$(SHARED_OBJ)) $(CPU_OBJ)
+$(CPU_PROG): $(CPU_SHARED_OBJ) $(CPU_OBJ)
 	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
 
-$(GPU_PROG): $(addprefix gpu_,$(SHARED_OBJ)) $(GPU_OBJ)
+$(GPU_PROG): $(GPU_SHARED_OBJ) $(GPU_OBJ)
 	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
 
-$(HYB_PROG): $(addprefix hyb_,$(SHARED_OBJ)) $(HYB_OBJ)
+$(HYB_PROG): $(HYB_SHARED_OBJ) $(HYB_OBJ)
 	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
 
 %.o: %.cu
@@ -45,13 +50,13 @@ $(HYB_PROG): $(addprefix hyb_,$(SHARED_OBJ)) $(HYB_OBJ)
 %.o: %.cpp
 	$(CCBIN) -mavx $(CFLAGS) -c $<
 
-$(addprefix cpu_,$(SHARED_OBJ)): $(addsuffix .cpp, $(basename $(SHARED_OBJ)))
+$(CPU_SHARED_OBJ): $(addsuffix .cpp, $(basename $(SHARED_OBJ)))
 	$(CCBIN) -mavx $(CFLAG_CPU) $(CFLAGS) -c $< -o $@
 
-$(addprefix gpu_,$(SHARED_OBJ)): $(addsuffix .cpp, $(basename $(SHARED_OBJ)))
+$(GPU_SHARED_OBJ): $(addsuffix .cpp, $(basename $(SHARED_OBJ)))
 	$(CCBIN) -mavx $(CFLAG_GPU) $(CFLAGS) -c $< -o $@
 
-$(addprefix hyb_,$(SHARED_OBJ)): $(addsuffix .cpp, $(basename $(SHARED_OBJ)))
+$(HYB_SHARED_OBJ): $(addsuffix .cpp, $(basename $(SHARED_OBJ)))
 	$(CCBIN) -mavx $(CFLAG_HYB) $(CFLAGS) -c $< -o $@
 
 clean:
