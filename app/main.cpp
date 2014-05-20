@@ -28,8 +28,8 @@
 #error Define NUMCPU as a positive value!
 #endif
 
-#ifndef shared
-#error Define shared()!
+#ifndef search
+#error Define search()!
 #endif
 
 extern int search (IpVec needle, ipoint_t *haystack, int haystack_size,

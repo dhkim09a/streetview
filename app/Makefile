@@ -56,5 +56,5 @@ $(addprefix hyb_,$(SHARED_OBJ)): $(addsuffix .cpp, $(basename $(SHARED_OBJ)))
 
 clean:
 	rm -f *.o
-	rm -f $(CPU_PROG) $(GPU_PROG)
+	rm -f *.elf
 
