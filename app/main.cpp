@@ -33,11 +33,17 @@
 #error Define search()!
 #endif
 
+#ifndef RESIZE
+#error Define RESIZE!
+#endif
+
+#ifdef GEO_CORRECTION
 #ifndef LAT_MPD
 #error Define LAT_MPD!
 #endif
 #ifndef LNG_MPD
 #error Define LNG_MPD!
+#endif
 #endif
 
 #define NEIGHBOR_DIST 15
@@ -113,6 +119,19 @@ int main (int argc, char **argv)
 		fprintf(stderr, "Failed to load image, %s\n", argv[1]);
 		close(db);
 		exit(0);
+	}
+	if (input_img->width > RESIZE || input_img->height > RESIZE) {
+		IplImage *resized_img;
+		float ratio = 1;
+		ratio = MIN(RESIZE / (float)input_img->width,
+				RESIZE / (float)input_img->height);
+		resized_img = cvCreateImage(cvSize(ratio * input_img->width,
+					ratio * input_img->height),
+				input_img->depth, input_img->nChannels);
+		cvResize(input_img, resized_img, CV_INTER_LINEAR);
+
+		cvReleaseImage(&input_img);
+		input_img = resized_img;
 	}
 #ifdef PROFILE
 	gettimeofday(&tv_from, NULL);
@@ -224,7 +243,37 @@ int main (int argc, char **argv)
 	for (i = 0; i < (int)answer_vec.size(); i++)
 		answer_vec[i].score += correction[i];
 #endif
+#if 0
+	/* Normalize the score */
+	float mean = 0, square_mean = 0, sigma = 0;
+	for (i = 0; i < (int)answer_vec.size(); i++) {
+		mean += answer_vec[i].score;
+		square_mean += answer_vec[i].score * answer_vec[i].score;
+	}
+	mean /= answer_vec.size();
+	square_mean /= answer_vec.size();
+	sigma = sqrtf(square_mean - (mean * mean));
+	for (i = 0; i < (int)answer_vec.size(); i++)
+		answer_vec[i].score = (answer_vec[i].score - mean) / sigma;
+#else
+	float sum = 0;
+	for (i = 0; i < (int)answer_vec.size(); i++) {
+		sum += answer_vec[i].score;
+	}
+	for (i = 0; i < (int)answer_vec.size(); i++)
+		answer_vec[i].score *= 100 / sum;
+#endif
 	std::sort(answer_vec.begin(), answer_vec.end(), comp_result);
+
+	float max_gap = 0, gap;
+	int cutline = 0;
+	for (i = 1; i < (int)answer_vec.size(); i++) {
+		gap = answer_vec[i-1].score - answer_vec[i].score;
+		if (gap > max_gap) {
+			max_gap = gap;
+			cutline = i;
+		}
+	}
 
 #ifdef PROFILE
 	gettimeofday(&tv_total_to, NULL);
@@ -246,7 +295,7 @@ int main (int argc, char **argv)
 #endif
 	printf("[Result]\n"
 		   "latitude   longitude  score\n");
-	for (i = 0; i < MIN(TOP, answer_vec.size()); i++)
+	for (i = 0; i < MIN(cutline, answer_vec.size()); i++)
 		printf(FPF_T" "FPF_T" %.3f\n",
 			answer_vec[i].latitude, answer_vec[i].longitude,
 			answer_vec[i].score);
