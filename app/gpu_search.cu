@@ -22,7 +22,7 @@ do { \
 do { \
 	__sync_synchronize(); \
 	gettimeofday(tv_to, NULL); \
-	time_ms = ((tv_to)->tv_sec - (tv_from)->tv_sec) * 1000 \
+	time_ms += ((tv_to)->tv_sec - (tv_from)->tv_sec) * 1000 \
 		+ ((tv_to)->tv_usec - (tv_from)->tv_usec) / 1000; \
 } while (0)
 #else
@@ -38,12 +38,12 @@ typedef struct _ipoint_essence_t {
 } __attribute__((packed)) ipoint_essence_t;
 
 /* FIXME: The result is a bit different from CPU's */
-__global__ void doSearchKernel (int shared_mem_size,
+__global__ void doSearchKernel (int shared_mem_size, int needle_idx,
 		ipoint_essence_t *needle, int needle_size,
 		ipoint_t *haystack, int haystack_size,
 		struct _interim *interim, int interim_size_local)
 {
-	if (threadIdx.x >= needle_size)
+	if (threadIdx.x + needle_idx >= needle_size)
 		return;
 
 	float dist, temp;
@@ -51,7 +51,8 @@ __global__ void doSearchKernel (int shared_mem_size,
 	int batch;
 
 	struct _interim *interim_local =
-		&(interim[(interim_size_local * blockIdx.x) + threadIdx.x]);
+		&(interim[(interim_size_local * blockIdx.x)
+				+ threadIdx.x + needle_idx]);
 	batch = haystack_size / gridDim.x;
 	int haystack_size_local = ((blockIdx.x + 1) * batch) > haystack_size ?
 		(haystack_size % batch) : batch;
@@ -59,11 +60,19 @@ __global__ void doSearchKernel (int shared_mem_size,
 	/* Copy needle into local memory */
 	ipoint_essence_t needle_local;
 	for (i = 0; i < VEC_DIM; i++)
-		needle_local.vec[i] = needle[threadIdx.x].vec[i];
+		needle_local.vec[i] = needle[threadIdx.x + needle_idx].vec[i];
 
 	struct _interim interim_temp;
-	interim_temp.dist_first = FLT_MAX;
-	interim_temp.dist_second = FLT_MAX;
+	if (interim_local->lat_first == 0) {
+		interim_temp.dist_first = FLT_MAX;
+		interim_temp.dist_second = FLT_MAX;
+	}
+	else {
+		interim_temp.dist_first = interim_local->dist_first;
+		interim_temp.dist_second = interim_local->dist_second;
+		interim_temp.lat_first = interim_local->lat_first;
+		interim_temp.lng_first = interim_local->lng_first;
+	}
 
 	extern __shared__ ipoint_t haystack_shared[];
 	batch = shared_mem_size / sizeof(ipoint_t);
@@ -144,8 +153,9 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	cudaDeviceProp device_prop;
 	cudaGetDeviceProperties(&device_prop, DEV_ID);
 
-	unsigned int block_dim = needle_size;
 	unsigned int grid_dim = (unsigned int)device_prop.multiProcessorCount;
+	unsigned int block_dim =
+		MIN(needle_size, (unsigned int)device_prop.maxThreadsPerBlock);
 
 	needle_essence_h = (ipoint_essence_t *)malloc(
 			needle_size * sizeof(ipoint_essence_t));
@@ -156,13 +166,13 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	PROFILE_FROM(&tv_from);
 	/* Copy needle to device */
 	if (cudaMalloc((void **)&needle_essence_d,
-			needle_size * sizeof(ipoint_essence_t)) != cudaSuccess) {
+				needle_size * sizeof(ipoint_essence_t)) != cudaSuccess) {
 		fprintf(stderr, "cudaMalloc(needle_essence_d) failed\n");
 		return -1;
 	}
 	if (cudaMemcpy(needle_essence_d, needle_essence_h,
-			needle_size * sizeof(ipoint_essence_t),
-			cudaMemcpyHostToDevice) != cudaSuccess) {
+				needle_size * sizeof(ipoint_essence_t),
+				cudaMemcpyHostToDevice) != cudaSuccess) {
 		fprintf(stderr,
 				"cudaMemcpy(needle_essence_d, needle_essence_h) failed\n");
 		return -1;
@@ -206,17 +216,25 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	interim_h = (struct _interim *)malloc(
 			grid_dim * sizeof(struct _interim) * needle_size);
 
-	PROFILE_FROM(&tv_from);
-	/* Run CUDA kernel */
-	doSearchKernel <<< grid_dim, block_dim, device_prop.sharedMemPerBlock >>>
-		(device_prop.sharedMemPerBlock,
-		 needle_essence_d, needle_size,
-		 haystack_d, haystack_size,
-		 interim_d, needle_size);
+	for (i = 0; i <= needle_size / block_dim; i++) {
+
+		PROFILE_FROM(&tv_from);
+		/* Run CUDA kernel */
+		doSearchKernel <<<
+			grid_dim,
+			(block_dim * (i + 1)) > needle_size ?
+				(needle_size % block_dim) : block_dim,
+			device_prop.sharedMemPerBlock >>>
+			(device_prop.sharedMemPerBlock, i * block_dim,
+			 needle_essence_d, needle_size,
+			 haystack_d, haystack_size,
+			 interim_d, needle_size);
 #ifdef PROFILE_CUDA
-	cudaDeviceSynchronize();
+		cudaDeviceSynchronize();
 #endif
-	PROFILE_TO(&tv_from, &tv_to, run_kernel_ms);
+		PROFILE_TO(&tv_from, &tv_to, run_kernel_ms);
+
+	}
 
 	PROFILE_FROM(&tv_from);
 	/* Copy result to host */
