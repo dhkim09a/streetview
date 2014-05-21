@@ -33,13 +33,30 @@
 #error Define search()!
 #endif
 
+#ifndef LAT_MPD
+#error Define LAT_MPD!
+#endif
+#ifndef LNG_MPD
+#error Define LNG_MPD!
+#endif
+
+#define NEIGHBOR_DIST 15
+
 extern int search (IpVec needle, ipoint_t *haystack, int haystack_size,
 		struct _interim *result, int result_size, int numcpu);
 
-/*
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
-*/
+#ifdef GEO_CORRECTION
+int isClose(FPF lat1, FPF lng1, FPF lat2, FPF lng2)
+{
+	if (((LAT_MPD * (lat1 - lat2)) * (LAT_MPD * (lat1 - lat2)))
+			+ ((LNG_MPD * (lng1 - lng2)) * (LNG_MPD * (lng1 - lng2)))
+			< NEIGHBOR_DIST * NEIGHBOR_DIST)
+		return 1;
+	else
+		return 0;
+}
+#endif
+
 int main (int argc, char **argv)
 {
 #ifdef PROFILE
@@ -192,6 +209,21 @@ int main (int argc, char **argv)
 			}
 		}
 	}
+#ifdef GEO_CORRECTION
+	float *correction = (float *)malloc(answer_vec.size() * sizeof(float));
+	memset(correction, 0, answer_vec.size() * sizeof(float));
+	for (i = 0; i < (int)answer_vec.size(); i++) {
+		for (j = 0; j < (int)answer_vec.size(); j++) {
+			if (i == j)
+				continue;
+			if (isClose(answer_vec[i].latitude, answer_vec[i].longitude,
+						answer_vec[j].latitude, answer_vec[j].longitude))
+				correction[i] += answer_vec[j].score;
+		}
+	}
+	for (i = 0; i < (int)answer_vec.size(); i++)
+		answer_vec[i].score += correction[i];
+#endif
 	std::sort(answer_vec.begin(), answer_vec.end(), comp_result);
 
 #ifdef PROFILE
@@ -212,9 +244,10 @@ int main (int argc, char **argv)
 		   etc_ms, 100 * (float)etc_ms / (float)total_ms,
 		   total_ms);
 #endif
-	printf("[Result] latitude longitude score\n");
+	printf("[Result]\n"
+		   "latitude   longitude  score\n");
 	for (i = 0; i < MIN(TOP, answer_vec.size()); i++)
-		printf(FPF_T" "FPF_T" %f\n",
+		printf(FPF_T" "FPF_T" %.3f\n",
 			answer_vec[i].latitude, answer_vec[i].longitude,
 			answer_vec[i].score);
 
