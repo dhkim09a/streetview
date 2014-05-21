@@ -68,7 +68,7 @@ __global__ void doSearchKernel (int shared_mem_size,
 	extern __shared__ ipoint_t haystack_shared[];
 	batch = shared_mem_size / sizeof(ipoint_t);
 	int iter;
-	for (k = 0; k < (haystack_size_local / batch); k++) {
+	for (k = 0; k <= (haystack_size_local / batch); k++) {
 
 		iter = ((k + 1) * batch) > haystack_size_local ?
 			(haystack_size_local % batch) : batch;
@@ -237,6 +237,17 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	iter = MIN((int)needle.size(), result_size);
 	for (i = 0; i < iter; i++) {
 		for (j = 0; j < (int)grid_dim; j++) {
+			if (result[i].dist_first == FLT_MAX) {
+				result[i].lat_first =
+					interim_h[(j * needle_size) + i].lat_first;
+				result[i].lng_first =
+					interim_h[(j * needle_size) + i].lng_first;
+				result[i].dist_first =
+					interim_h[(j * needle_size) + i].dist_first;
+				result[i].dist_second =
+					interim_h[(j * needle_size) + i].dist_second;
+				continue;
+			}
 			dist = interim_h[(j * needle_size) + i].dist_first;
 			if (dist < result[i].dist_first) {
 				result[i].lat_first =

@@ -42,9 +42,9 @@ int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 
 	iter = MIN(interim_size, (int)(*needle).size());
 	int batch = MIN(100, iter);
-	for (l = 0; l < (iter / batch); l++) {
+	for (l = 0; l <= (iter / batch); l++) {
 		for (j = 0; j < haystack_size; j++) {
-			for (i = l * batch; (i < iter) && (i < (l+1) * batch); i++) {
+			for (i = l * batch; (i < iter) && (i < (l + 1) * batch); i++) {
 #ifdef AVX
 				float res[8] = {0};
 
@@ -184,8 +184,15 @@ int searchCPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	}
 
 	iter = MIN((int)needle.size(), result_size);
-	for (j = 0; j < numcpu; j++) {
-		for (i = 0; i < iter; i++) {
+	for (i = 0; i < iter; i++) {
+		for (j = 0; j < numcpu; j++) {
+			if (result[i].dist_first == FLT_MAX) {
+				result[i].lat_first = args[j].interim[i].lat_first;
+				result[i].lng_first = args[j].interim[i].lng_first;
+				result[i].dist_first = args[j].interim[i].dist_first;
+				result[i].dist_second = args[j].interim[i].dist_second;
+				continue;
+			}
 			dist = args[j].interim[i].dist_first;
 			if (dist < result[i].dist_first) {
 				result[i].lat_first = args[j].interim[i].lat_first;

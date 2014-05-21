@@ -169,8 +169,15 @@ int searchHyb (IpVec needle, ipoint_t *haystack, int haystack_size,
 	}
 
 	iter = MIN((int)needle.size(), result_size);
-	for (j = 0; j < 2; j++) {
-		for (i = 0; i < iter; i++) {
+	for (i = 0; i < iter; i++) {
+		for (j = 0; j < 2; j++) {
+			if (result[i].dist_first == FLT_MAX) {
+				result[i].lat_first = args[j].result[i].lat_first;
+				result[i].lng_first = args[j].result[i].lng_first;
+				result[i].dist_first = args[j].result[i].dist_first;
+				result[i].dist_second = args[j].result[i].dist_second;
+				continue;
+			}
 			dist = args[j].result[i].dist_first;
 			if (dist < result[i].dist_first) {
 				result[i].lat_first = args[j].result[i].lat_first;
