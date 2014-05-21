@@ -13,14 +13,15 @@
 typedef struct _result_t {
 	FPF latitude;
 	FPF longitude;
-	int occurence;
+	float score;
 } result_t;
 
 typedef std::vector<result_t> ResVec;
 
 static bool comp_result (result_t i, result_t j)
 {
-	return i.occurence > j.occurence;
+	/* > for descending order, < for ascending order */
+	return i.score > j.score;
 }
 
 struct _interim {

@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <vector>
+#include <math.h>
 #include <cv.h>
 #include "surflib.h"
 
@@ -69,6 +70,7 @@ int main (int argc, char **argv)
 	IpVec input_ipts;
 
 	int i, j, found;
+	float dist_ratio;
 
 	if ((db = open(argv[2], O_RDONLY)) < 0) {
 		fprintf(stderr, "Cannot open file, %s\n", argv[2]);
@@ -169,12 +171,13 @@ int main (int argc, char **argv)
 	close(db);
 
 	for (i = 0; i < (int)input_ipts.size(); i++) {
-		if (result[i].dist_first / result[i].dist_second < MATCH_THRESH_SQUARE){
+		dist_ratio = result[i].dist_first / result[i].dist_second;
+		if (dist_ratio < MATCH_THRESH_SQUARE){
 			found = -1;
 			for (j = 0; j < (int)answer_vec.size(); j++) {
 				if (answer_vec[j].latitude == result[i].lat_first
 						&& answer_vec[j].longitude == result[i].lng_first) {
-					answer_vec[j].occurence++;
+					answer_vec[j].score += 1 - dist_ratio;
 					found = 1;
 					break;
 				}
@@ -183,7 +186,7 @@ int main (int argc, char **argv)
 			if (found < 0) {
 				answer.latitude = result[i].lat_first;
 				answer.longitude = result[i].lng_first;
-				answer.occurence = 1;
+				answer.score = 1 - dist_ratio;
 
 				answer_vec.push_back(answer);
 			}
@@ -211,9 +214,9 @@ int main (int argc, char **argv)
 #endif
 	printf("[Result] latitude longitude score\n");
 	for (i = 0; i < MIN(TOP, answer_vec.size()); i++)
-		printf(FPF_T" "FPF_T" %d\n",
+		printf(FPF_T" "FPF_T" %f\n",
 			answer_vec[i].latitude, answer_vec[i].longitude,
-			answer_vec[i].occurence);
+			answer_vec[i].score);
 
 	return 0;
 }
