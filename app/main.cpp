@@ -13,12 +13,13 @@
 
 #include "db.h"
 #include "search.h"
+#include "db_loader.h"
 
 #define TOP 10
 #define SURF_THRESHOLD 0.0001f
 
-#ifndef DB_LIMIT
-#error Define DB_LIMIT!
+#ifndef RUN_UNIT
+#error Define RUN_UNIT!
 #endif
 
 #ifndef MEM_LIMIT
@@ -79,7 +80,7 @@ int main (int argc, char **argv)
 		exit(0);
 	}
 
-	int db;
+	int db_fd;
 	struct stat status;
 	ipoint_t *haystack = NULL;
 	int haystack_size; /* number of entries in haystack */
@@ -92,17 +93,21 @@ int main (int argc, char **argv)
 	IplImage *input_img;
 	IpVec input_ipts;
 
-	int i, j, found;
+	int i, j, found, dummy;
 	float dist_ratio;
 
-	if ((db = open(argv[2], O_RDONLY)) < 0) {
+	pthread_t db_loader_thread;
+
+	db_t db;
+
+	if ((db_fd = open(argv[2], O_RDONLY)) < 0) {
 		fprintf(stderr, "Cannot open file, %s\n", argv[2]);
 		exit(0);
 	}
 
-	if (fstat(db, &status)) {
+	if (fstat(db_fd, &status)) {
 		fprintf(stderr, "Cannot read file stat, %s\n", argv[2]);
-		close(db);
+		close(db_fd);
 		exit(0);
 	}
 
@@ -110,14 +115,17 @@ int main (int argc, char **argv)
 		fprintf(stderr, 
 				"Database file might be corrupted (file_size %% %lu != 0)\n",
 				sizeof(ipoint_t));
-		close(db);
+		close(db_fd);
 		exit(0);
 	}
+
+	db_init(&db, db_fd, status.st_size);
+	pthread_create(&db_loader_thread, NULL, &db_loader_main, (void*)(&db));
 
 	/* SURF input image */
 	if (!(input_img = cvLoadImage(argv[1]))) {
 		fprintf(stderr, "Failed to load image, %s\n", argv[1]);
-		close(db);
+		close(db_fd);
 		exit(0);
 	}
 	if (input_img->width > RESIZE || input_img->height > RESIZE) {
@@ -161,7 +169,7 @@ int main (int argc, char **argv)
 	db_left = status.st_size;
 
 	while (1) {
-		haystack_size = MIN(MEM_LIMIT, db_left) / sizeof(ipoint_t);
+		haystack_size = MIN(RUN_UNIT, db_left) / sizeof(ipoint_t);
 		haystack_mem_size = haystack_size * sizeof(ipoint_t);
 
 		if (haystack_size <= 0)
@@ -173,17 +181,25 @@ int main (int argc, char **argv)
 		if (haystack == NULL)
 			haystack = (ipoint_t *)malloc(haystack_mem_size);
 
-		if (read(db, haystack, haystack_mem_size)
+		pthread_mutex_lock(&db.mx_db);
+		while (db_readable(&db) < haystack_mem_size) {
+			pthread_cond_wait(&db.cd_reader, &db.mx_db);
+		}
+
+		if (db_read(&db, haystack, haystack_mem_size)
 				!= (long long)haystack_mem_size) {
 			fprintf(stderr, "Failed to read database file\n");
-			close(db);
+			close(db_fd);
 			exit(0);
 		}
 		else {
 			db_left -= haystack_mem_size;
 			printf("Read %lu / %lu bytes from DB\n",
 					status.st_size - db_left, status.st_size);
+			pthread_cond_signal(&db.cd_writer);
 		}
+		pthread_mutex_unlock(&db.mx_db);
+
 #ifdef PROFILE
 		gettimeofday(&tv_to, NULL);
 		load_db_ms += (tv_to.tv_sec - tv_from.tv_sec) * 1000
@@ -204,7 +220,11 @@ int main (int argc, char **argv)
 #endif
 	}
 
-	close(db);
+	db_kill(&db);
+	
+	pthread_join(db_loader_thread, (void **)&dummy);
+
+	close(db_fd);
 
 	for (i = 0; i < (int)input_ipts.size(); i++) {
 		dist_ratio = result[i].dist_first / result[i].dist_second;

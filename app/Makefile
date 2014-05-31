@@ -24,24 +24,25 @@ CPU_PROG = cpu.elf
 GPU_PROG = gpu.elf
 HYB_PROG = hyb.elf
 
-SHARED_OBJ = main.o
+SHARED_OBJ = db_loader.o
+SRC_SHARED_OBJ = main.o
 CPU_OBJ = cpu_search.o
 GPU_OBJ = gpu_search.o
 HYB_OBJ = hyb_search.o $(CPU_OBJ) $(GPU_OBJ)
 
-CPU_SHARED_OBJ = $(addprefix cpu_,$(SHARED_OBJ))
-GPU_SHARED_OBJ = $(addprefix gpu_,$(SHARED_OBJ))
-HYB_SHARED_OBJ = $(addprefix hyb_,$(SHARED_OBJ))
+CPU_SHARED_OBJ = $(addprefix cpu_,$(SRC_SHARED_OBJ))
+GPU_SHARED_OBJ = $(addprefix gpu_,$(SRC_SHARED_OBJ))
+HYB_SHARED_OBJ = $(addprefix hyb_,$(SRC_SHARED_OBJ))
 
 all: $(HYB_PROG) $(CPU_PROG) $(GPU_PROG)
 
-$(CPU_PROG): $(CPU_SHARED_OBJ) $(CPU_OBJ)
+$(CPU_PROG): $(SHARED_OBJ) $(CPU_SHARED_OBJ) $(CPU_OBJ)
 	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
 
-$(GPU_PROG): $(GPU_SHARED_OBJ) $(GPU_OBJ)
+$(GPU_PROG): $(SHARED_OBJ) $(GPU_SHARED_OBJ) $(GPU_OBJ)
 	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
 
-$(HYB_PROG): $(HYB_SHARED_OBJ) $(HYB_OBJ)
+$(HYB_PROG): $(SHARED_OBJ) $(HYB_SHARED_OBJ) $(HYB_OBJ)
 	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
 
 %.o: %.cu
@@ -50,13 +51,13 @@ $(HYB_PROG): $(HYB_SHARED_OBJ) $(HYB_OBJ)
 %.o: %.cpp
 	$(CCBIN) -mavx $(CFLAGS) -c $<
 
-$(CPU_SHARED_OBJ): $(addsuffix .cpp, $(basename $(SHARED_OBJ)))
+$(CPU_SHARED_OBJ): $(addsuffix .cpp, $(basename $(SRC_SHARED_OBJ)))
 	$(CCBIN) -mavx $(CFLAG_CPU) $(CFLAGS) -c $< -o $@
 
-$(GPU_SHARED_OBJ): $(addsuffix .cpp, $(basename $(SHARED_OBJ)))
+$(GPU_SHARED_OBJ): $(addsuffix .cpp, $(basename $(SRC_SHARED_OBJ)))
 	$(CCBIN) -mavx $(CFLAG_GPU) $(CFLAGS) -c $< -o $@
 
-$(HYB_SHARED_OBJ): $(addsuffix .cpp, $(basename $(SHARED_OBJ)))
+$(HYB_SHARED_OBJ): $(addsuffix .cpp, $(basename $(SRC_SHARED_OBJ)))
 	$(CCBIN) -mavx $(CFLAG_HYB) $(CFLAGS) -c $< -o $@
 
 clean:
