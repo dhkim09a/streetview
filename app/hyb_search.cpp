@@ -144,7 +144,7 @@ int searchHyb (IpVec needle, ipoint_t *haystack, int haystack_size,
 	args[GPU].mx_running = args[CPU].mx_running = &mx_running;
 	args[GPU].wakeup_master = args[CPU].wakeup_master = &wakeup_master;
 	args[GPU].numcpu = 0;
-	args[CPU].numcpu = numcpu - 1;
+	args[CPU].numcpu = numcpu;
 	for (i = 0; i < (int)needle.size(); i++) {
 		for (j = 0; j < 2; j++) {
 		args[j].result[i].dist_first = FLT_MAX;
@@ -178,6 +178,7 @@ int searchHyb (IpVec needle, ipoint_t *haystack, int haystack_size,
 				result[i].dist_second = args[j].result[i].dist_second;
 				continue;
 			}
+
 			dist = args[j].result[i].dist_first;
 			if (dist < result[i].dist_first) {
 				result[i].lat_first = args[j].result[i].lat_first;

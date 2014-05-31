@@ -122,6 +122,8 @@ __global__ void doSearchKernel (int shared_mem_size, int needle_idx,
 int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 		struct _interim *result, int result_size, int dummy)
 {
+	cudaSetDevice(DEV_ID);
+	cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
 #ifdef PROFILE_CUDA
 	struct timeval tv_from, tv_to;
 	struct timeval tv_total_from, tv_total_to;
@@ -149,7 +151,6 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 #endif
 	PROFILE_TO(&tv_from, &tv_to, init_device_ms);
 
-	cudaSetDevice(DEV_ID);
 	cudaDeviceProp device_prop;
 	cudaGetDeviceProperties(&device_prop, DEV_ID);
 
@@ -266,6 +267,7 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 					interim_h[(j * needle_size) + i].dist_second;
 				continue;
 			}
+
 			dist = interim_h[(j * needle_size) + i].dist_first;
 			if (dist < result[i].dist_first) {
 				result[i].lat_first =
