@@ -45,7 +45,7 @@ $(HYB_PROG): $(HYB_SHARED_OBJ) $(HYB_OBJ)
 	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
 
 %.o: %.cu
-	$(CC) -O2 --use_fast_math $(addprefix -Xcompiler ,$(CFLAGS)) -c $<
+	$(CC) -O0 --use_fast_math $(addprefix -Xcompiler ,$(CFLAGS)) -c $<
 
 %.o: %.cpp
 	$(CCBIN) -mavx $(CFLAGS) -c $<
