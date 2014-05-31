@@ -279,6 +279,18 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 			}
 			else if (dist < result[i].dist_second)
 				result[i].dist_second = dist;
+
+			dist = interim_h[(j * needle_size) + i].dist_second;
+			if (dist < result[i].dist_first) {
+				result[i].lat_first =
+					interim_h[(j * needle_size) + i].lat_first;
+				result[i].lng_first =
+					interim_h[(j * needle_size) + i].lng_first;
+				result[i].dist_second = result[i].dist_first;
+				result[i].dist_first = dist;
+			}
+			else if (dist < result[i].dist_second)
+				result[i].dist_second = dist;
 		}
 	}
 	PROFILE_TO(&tv_from, &tv_to, postprocessing_ms);

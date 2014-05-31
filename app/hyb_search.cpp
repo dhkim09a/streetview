@@ -188,6 +188,16 @@ int searchHyb (IpVec needle, ipoint_t *haystack, int haystack_size,
 			}
 			else if (dist < result[i].dist_second)
 				result[i].dist_second = dist;
+
+			dist = args[j].result[i].dist_second;
+			if (dist < result[i].dist_first) {
+				result[i].lat_first = args[j].result[i].lat_first;
+				result[i].lng_first = args[j].result[i].lng_first;
+				result[i].dist_second = result[i].dist_first;
+				result[i].dist_first = dist;
+			}
+			else if (dist < result[i].dist_second)
+				result[i].dist_second = dist;
 		}
 	}
 

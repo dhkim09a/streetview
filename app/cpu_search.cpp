@@ -193,7 +193,18 @@ int searchCPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 				result[i].dist_second = args[j].interim[i].dist_second;
 				continue;
 			}
+
 			dist = args[j].interim[i].dist_first;
+			if (dist < result[i].dist_first) {
+				result[i].lat_first = args[j].interim[i].lat_first;
+				result[i].lng_first = args[j].interim[i].lng_first;
+				result[i].dist_second = result[i].dist_first;
+				result[i].dist_first = dist;
+			}
+			else if (dist < result[i].dist_second)
+				result[i].dist_second = dist;
+
+			dist = args[j].interim[i].dist_second;
 			if (dist < result[i].dist_first) {
 				result[i].lat_first = args[j].interim[i].lat_first;
 				result[i].lng_first = args[j].interim[i].lng_first;
