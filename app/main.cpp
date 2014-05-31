@@ -15,6 +15,11 @@
 #include "search.h"
 #include "db_loader.h"
 
+#ifdef PROFILE
+#define PROFILE_ON
+#endif
+#include "profile.h"
+
 #define TOP 10
 #define SURF_THRESHOLD 0.0001f
 
@@ -66,14 +71,13 @@ int isClose(FPF lat1, FPF lng1, FPF lat2, FPF lng2)
 
 int main (int argc, char **argv)
 {
-#ifdef PROFILE
-	struct timeval tv_from, tv_to;
-	struct timeval tv_total_from, tv_total_to;
-	unsigned long surf_input_ms = 0, load_db_ms = 0, vec_match_ms = 0;
-	unsigned long etc_ms = 0, total_ms = 0;
-
-	gettimeofday(&tv_total_from, NULL);
-#endif
+	PROFILE_START();
+	PROFILE_VAR(resize_image);
+	PROFILE_VAR(surf_input);
+	PROFILE_VAR(load_db);
+	PROFILE_VAR(vec_match);
+	PROFILE_VAR(post_processing);
+	PROFILE_VAR(manage_db_thread);
 
 	if (argc != 3) {
 		printf("usage: %s [input image] [database file]\n", argv[0]);
@@ -119,8 +123,10 @@ int main (int argc, char **argv)
 		exit(0);
 	}
 
+	PROFILE_FROM(manage_db_thread);
 	db_init(&db, db_fd, status.st_size);
 	pthread_create(&db_loader_thread, NULL, &db_loader_main, (void*)(&db));
+	PROFILE_TO(manage_db_thread);
 
 	/* SURF input image */
 	if (!(input_img = cvLoadImage(argv[1]))) {
@@ -128,6 +134,7 @@ int main (int argc, char **argv)
 		close(db_fd);
 		exit(0);
 	}
+	PROFILE_FROM(resize_image);
 	if (input_img->width > RESIZE || input_img->height > RESIZE) {
 		IplImage *resized_img;
 		float ratio = 1;
@@ -141,15 +148,13 @@ int main (int argc, char **argv)
 		cvReleaseImage(&input_img);
 		input_img = resized_img;
 	}
-#ifdef PROFILE
-	gettimeofday(&tv_from, NULL);
-#endif
+	PROFILE_TO(resize_image);
+
+	PROFILE_FROM(surf_input);
+
 	surfDetDes(input_img, input_ipts, false, 3, 4, 3, SURF_THRESHOLD);
-#ifdef PROFILE
-	gettimeofday(&tv_to, NULL);
-	surf_input_ms = (tv_to.tv_sec - tv_from.tv_sec) * 1000
-		+ (tv_to.tv_usec - tv_from.tv_usec) / 1000;
-#endif
+
+	PROFILE_TO(surf_input);
 
 	cvReleaseImage(&input_img);
 
@@ -175,9 +180,8 @@ int main (int argc, char **argv)
 		if (haystack_size <= 0)
 			break;
 
-#ifdef PROFILE
-		gettimeofday(&tv_from, NULL);
-#endif
+		PROFILE_FROM(load_db);
+
 		if (haystack == NULL)
 			haystack = (ipoint_t *)malloc(haystack_mem_size);
 
@@ -200,31 +204,30 @@ int main (int argc, char **argv)
 		}
 		pthread_mutex_unlock(&db.mx_db);
 
-#ifdef PROFILE
-		gettimeofday(&tv_to, NULL);
-		load_db_ms += (tv_to.tv_sec - tv_from.tv_sec) * 1000
-			+ (tv_to.tv_usec - tv_from.tv_usec) / 1000;
-#endif
+		PROFILE_TO(load_db);
 
 		printf("Finding %lu needles from haystack of %d\n",
 				input_ipts.size(), haystack_size);
-#ifdef PROFILE
-		gettimeofday(&tv_from, NULL);
-#endif
+
+		PROFILE_FROM(vec_match);
+
 		search(input_ipts, haystack, haystack_size, result, input_ipts.size(),
 				NUMCPU);
-#ifdef PROFILE
-		gettimeofday(&tv_to, NULL);
-		vec_match_ms += (tv_to.tv_sec - tv_from.tv_sec) * 1000
-			+ (tv_to.tv_usec - tv_from.tv_usec) / 1000;
-#endif
+
+		PROFILE_TO(vec_match);
 	}
+
+	PROFILE_FROM(manage_db_thread);
 
 	db_kill(&db);
 	
 	pthread_join(db_loader_thread, (void **)&dummy);
 
+	PROFILE_TO(manage_db_thread);
+
 	close(db_fd);
+
+	PROFILE_FROM(post_processing);
 
 	for (i = 0; i < (int)input_ipts.size(); i++) {
 		dist_ratio = result[i].dist_first / result[i].dist_second;
@@ -295,24 +298,11 @@ int main (int argc, char **argv)
 		}
 	}
 
-#ifdef PROFILE
-	gettimeofday(&tv_total_to, NULL);
-	total_ms += (tv_total_to.tv_sec - tv_total_from.tv_sec) * 1000
-		+ (tv_total_to.tv_usec - tv_total_from.tv_usec) / 1000;
-	etc_ms = total_ms - surf_input_ms - load_db_ms - vec_match_ms;
+	PROFILE_TO(post_processing);
 
-	printf("[Profile]\n"
-		   "SURF input image: %7lu ms (%5.2f %%)\n"
-		   "Load database   : %7lu ms (%5.2f %%)\n"
-		   "Vector searching: %7lu ms (%5.2f %%)\n"
-		   "etc.            : %7lu ms (%5.2f %%)\n"
-		   "Total           : %7lu ms\n",
-		   surf_input_ms, 100 * (float)surf_input_ms / (float)total_ms,
-		   load_db_ms, 100 * (float)load_db_ms / (float)total_ms,
-		   vec_match_ms, 100 * (float)vec_match_ms / (float)total_ms,
-		   etc_ms, 100 * (float)etc_ms / (float)total_ms,
-		   total_ms);
-#endif
+	PROFILE_END();
+	PROFILE_PRINT(stdout);
+
 	printf("[Result]\n"
 		   "latitude   longitude  score\n");
 	for (i = 0; i < MIN(cutline, answer_vec.size()); i++)

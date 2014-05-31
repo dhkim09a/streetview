@@ -12,23 +12,9 @@
 #include "search.h"
 
 #ifdef PROFILE_CUDA
-#define PROFILE_FROM(tv_from) \
-do { \
-	__sync_synchronize(); \
-	gettimeofday((tv_from), NULL); \
-} while (0)
-
-#define PROFILE_TO(tv_from, tv_to, time_ms) \
-do { \
-	__sync_synchronize(); \
-	gettimeofday(tv_to, NULL); \
-	time_ms += ((tv_to)->tv_sec - (tv_from)->tv_sec) * 1000 \
-		+ ((tv_to)->tv_usec - (tv_from)->tv_usec) / 1000; \
-} while (0)
-#else
-#define PROFILE_FROM(args...)
-#define PROFILE_TO(args...)
+#define PROFILE_ON
 #endif
+#include "profile.h"
 
 /* Use device 0 */
 #define DEV_ID 0
@@ -124,17 +110,14 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 {
 	cudaSetDevice(DEV_ID);
 	cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
-#ifdef PROFILE_CUDA
-	struct timeval tv_from, tv_to;
-	struct timeval tv_total_from, tv_total_to;
-	unsigned long init_device_ms = 0;
-	unsigned long copy_needle_ms = 0, copy_haystack_ms = 0;
-	unsigned long run_kernel_ms = 0, copy_result_ms = 0;
-	unsigned long postprocessing_ms = 0;
-	unsigned long etc_ms = 0, total_ms = 0;
 
-	PROFILE_FROM(&tv_total_from);
-#endif
+	PROFILE_START();
+	PROFILE_VAR(init_device);
+	PROFILE_VAR(copy_needle);
+	PROFILE_VAR(copy_haystack);
+	PROFILE_VAR(run_kernel);
+	PROFILE_VAR(copy_result);
+	PROFILE_VAR(post_processing);
 
 	int i, j, iter;
 	float dist;
@@ -145,11 +128,11 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	int needle_size = needle.size();
 	cudaError_t err;
 
-	PROFILE_FROM(&tv_from);
+	PROFILE_FROM(init_device);
 #ifdef PROFILE_CUDA
 	cudaDeviceSynchronize();
 #endif
-	PROFILE_TO(&tv_from, &tv_to, init_device_ms);
+	PROFILE_TO(init_device);
 
 	cudaDeviceProp device_prop;
 	cudaGetDeviceProperties(&device_prop, DEV_ID);
@@ -164,7 +147,7 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 		for (j = 0; j < VEC_DIM; j++)
 			needle_essence_h[i].vec[j] = needle[i].descriptor[j];
 
-	PROFILE_FROM(&tv_from);
+	PROFILE_FROM(copy_needle);
 	/* Copy needle to device */
 	if (cudaMalloc((void **)&needle_essence_d,
 				needle_size * sizeof(ipoint_essence_t)) != cudaSuccess) {
@@ -181,9 +164,9 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 #ifdef PROFILE_CUDA
 	cudaDeviceSynchronize();
 #endif
-	PROFILE_TO(&tv_from, &tv_to, copy_needle_ms);
+	PROFILE_TO(copy_needle);
 
-	PROFILE_FROM(&tv_from);
+	PROFILE_FROM(copy_haystack);
 	/* Copy haystack to device */
 	if (cudaMalloc((void **)&haystack_d,
 				haystack_size * sizeof(ipoint_t)) != cudaSuccess) {
@@ -199,7 +182,7 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 #ifdef PROFILE_CUDA
 	cudaDeviceSynchronize();
 #endif
-	PROFILE_TO(&tv_from, &tv_to, copy_haystack_ms);
+	PROFILE_TO(copy_haystack);
 
 	/* Allocate memory for result
 	 * TODO: Still the result must be copied from device is about
@@ -219,7 +202,7 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 
 	for (i = 0; i <= needle_size / block_dim; i++) {
 
-		PROFILE_FROM(&tv_from);
+		PROFILE_FROM(run_kernel);
 		/* Run CUDA kernel */
 		doSearchKernel <<<
 			grid_dim,
@@ -233,11 +216,11 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 #ifdef PROFILE_CUDA
 		cudaDeviceSynchronize();
 #endif
-		PROFILE_TO(&tv_from, &tv_to, run_kernel_ms);
+		PROFILE_TO(run_kernel);
 
 	}
 
-	PROFILE_FROM(&tv_from);
+	PROFILE_FROM(copy_result);
 	/* Copy result to host */
 	err = cudaMemcpy(interim_h, interim_d,
 			grid_dim * sizeof(struct _interim) * needle_size,
@@ -250,9 +233,9 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 #ifdef PROFILE_CUDA
 	cudaDeviceSynchronize();
 #endif
-	PROFILE_TO(&tv_from, &tv_to, copy_result_ms);
+	PROFILE_TO(copy_result);
 
-	PROFILE_FROM(&tv_from);
+	PROFILE_FROM(post_processing);
 	iter = MIN((int)needle.size(), result_size);
 	for (i = 0; i < iter; i++) {
 		for (j = 0; j < (int)grid_dim; j++) {
@@ -293,7 +276,7 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 				result[i].dist_second = dist;
 		}
 	}
-	PROFILE_TO(&tv_from, &tv_to, postprocessing_ms);
+	PROFILE_TO(post_processing);
 
 	free(needle_essence_h);
 	free(interim_h);
@@ -302,31 +285,8 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	cudaFree(haystack_d);
 	cudaFree(interim_d);
 
-#ifdef PROFILE_CUDA
-	PROFILE_TO(&tv_total_from, &tv_total_to, total_ms);
-	etc_ms = total_ms
-		- init_device_ms
-		- copy_needle_ms - copy_haystack_ms
-		- run_kernel_ms - copy_result_ms
-		- postprocessing_ms;
-
-	printf("[CUDA Profile]\n"
-		   "Initialize device      : %7lu ms (%5.2f %%)\n"
-		   "Copy needle to device  : %7lu ms (%5.2f %%)\n"
-		   "Copy haystack to device: %7lu ms (%5.2f %%)\n"
-		   "Run CUDA kernel        : %7lu ms (%5.2f %%)\n"
-		   "Copy result from device: %7lu ms (%5.2f %%)\n"
-		   "Post processing        : %7lu ms (%5.2f %%)\n"
-		   "etc.                   : %7lu ms (%5.2f %%)\n"
-		   "Total                  : %7lu ms\n",
-		   init_device_ms, 100 * (float)init_device_ms / (float)total_ms,
-		   copy_needle_ms, 100 * (float)copy_needle_ms / (float)total_ms,
-		   copy_haystack_ms, 100 * (float)copy_haystack_ms / (float)total_ms,
-		   run_kernel_ms, 100 * (float)run_kernel_ms / (float)total_ms,
-		   copy_result_ms, 100 * (float)copy_result_ms / (float)total_ms,
-		   postprocessing_ms, 100 * (float)postprocessing_ms / (float)total_ms,
-		   etc_ms, 100 * (float)etc_ms / (float)total_ms,
-		   total_ms);
-#endif
+	PROFILE_END();
+	PROFILE_PRINT(stdout);
+	
 	return 0;
 }
