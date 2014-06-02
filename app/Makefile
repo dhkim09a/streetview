@@ -24,15 +24,15 @@ CPU_PROG = cpu.elf
 GPU_PROG = gpu.elf
 HYB_PROG = hyb.elf
 
-SHARED_OBJ = db_loader.o
-SRC_SHARED_OBJ = main.o
+SHARED_OBJ = db_loader.o main.o
+SRC_SHARED_OBJ = search.o
 CPU_OBJ = cpu_search.o
 GPU_OBJ = gpu_search.o
 HYB_OBJ = hyb_search.o $(CPU_OBJ) $(GPU_OBJ)
 
-CPU_SHARED_OBJ = $(addprefix cpu_,$(SRC_SHARED_OBJ))
-GPU_SHARED_OBJ = $(addprefix gpu_,$(SRC_SHARED_OBJ))
-HYB_SHARED_OBJ = $(addprefix hyb_,$(SRC_SHARED_OBJ))
+CPU_SHARED_OBJ = $(addprefix c_,$(SRC_SHARED_OBJ))
+GPU_SHARED_OBJ = $(addprefix g_,$(SRC_SHARED_OBJ))
+HYB_SHARED_OBJ = $(addprefix h_,$(SRC_SHARED_OBJ))
 
 all: $(HYB_PROG) $(CPU_PROG) $(GPU_PROG)
 

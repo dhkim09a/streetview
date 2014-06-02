@@ -65,6 +65,7 @@ do { int i; \
 	fprintf(fp, "etc.                          : %7ld ms (%5.2f %%)\n", \
 			__c_etc_ms, 100 * (float)__c_etc_ms / (float)__c_total_ms); \
 	fprintf(fp, "total                         : %7ld ms\n", __c_total_ms); \
+	fflush(fp); \
 } while (0)
 
 #else /* PROFILE_ON */

@@ -21,96 +21,61 @@
 #include "profile.h"
 
 #define TOP 10
-#define SURF_THRESHOLD 0.0001f
-
-#ifndef RUN_UNIT
-#error Define RUN_UNIT!
-#endif
-
-#ifndef MEM_LIMIT
-#error Define MEM_LIMIT!
-#endif
-
-#ifndef NUMCPU
-#error Define NUMCPU as a positive value!
-#endif
-
-#ifndef search
-#error Define search()!
-#endif
+#define MAX_IMG_PATH_LEN 200
 
 #ifndef RESIZE
 #error Define RESIZE!
 #endif
 
-#ifdef GEO_CORRECTION
-#ifndef LAT_MPD
-#error Define LAT_MPD!
-#endif
-#ifndef LNG_MPD
-#error Define LNG_MPD!
-#endif
-#endif
+typedef struct _cb_arg_t {
+	pthread_mutex_t mx_block;
+	pthread_cond_t cd_block;
+} cb_arg_t;
 
-#define NEIGHBOR_DIST 15
-
-extern int search (IpVec needle, ipoint_t *haystack, int haystack_size,
-		struct _interim *result, int result_size, int numcpu);
-
-#ifdef GEO_CORRECTION
-int isClose(FPF lat1, FPF lng1, FPF lat2, FPF lng2)
+void callback (req_msg_t *msg, FPF latitude, FPF longitude, float score,
+		void *arg_void)
 {
-	if (((LAT_MPD * (lat1 - lat2)) * (LAT_MPD * (lat1 - lat2)))
-			+ ((LNG_MPD * (lng1 - lng2)) * (LNG_MPD * (lng1 - lng2)))
-			< NEIGHBOR_DIST * NEIGHBOR_DIST)
-		return 1;
-	else
-		return 0;
+	cb_arg_t *arg = (cb_arg_t *)arg_void;
+
+	printf("latitude   longitude  score\n");
+	printf(FPF_T" "FPF_T" %.3f\n", latitude, longitude, score);
+	fflush(stdout);
+
+	cvReleaseImage(&msg->img);
+
+	pthread_cond_signal(&arg->cd_block);
 }
-#endif
 
 int main (int argc, char **argv)
 {
-	PROFILE_START();
-	PROFILE_VAR(resize_image);
-	PROFILE_VAR(surf_input);
-	PROFILE_VAR(load_db);
-	PROFILE_VAR(vec_match);
-	PROFILE_VAR(post_processing);
-	PROFILE_VAR(manage_db_thread);
-
-	if (argc != 3) {
-		printf("usage: %s [input image] [database file]\n", argv[0]);
+	if (argc != 2) {
+		printf("usage: %s [database file]\n", argv[0]);
 		exit(0);
 	}
 
 	int db_fd;
 	struct stat status;
-	ipoint_t *haystack = NULL;
-	int haystack_size; /* number of entries in haystack */
-	size_t haystack_mem_size;
-	size_t db_left;
-	struct _interim *result;
-	result_t answer;
-	ResVec answer_vec;
+	
+	int dummy;
 
 	IplImage *input_img;
-	IpVec input_ipts;
+	char img_path[MAX_IMG_PATH_LEN] = {0};
 
-	int i, j, found, dummy;
-	float dist_ratio;
-
-	pthread_t db_loader_thread;
-
+	pthread_t db_loader_thread, search_thread;
 	db_t db;
+	search_t sc;
 
-	if ((db_fd = open(argv[2], O_RDONLY)) < 0) {
-		fprintf(stderr, "Cannot open file, %s\n", argv[2]);
+	cb_arg_t cb_arg;
+	pthread_mutex_init(&cb_arg.mx_block, NULL);
+	pthread_cond_init(&cb_arg.cd_block, NULL);
+
+	if ((db_fd = open(argv[1], O_RDONLY)) < 0) {
+		fprintf(stderr, "Cannot open file, %s\n", argv[1]);
 		exit(0);
 	}
 
 	if (fstat(db_fd, &status)) {
-		fprintf(stderr, "Cannot read file stat, %s\n", argv[2]);
+		fprintf(stderr, "Cannot read file stat, %s\n", argv[1]);
 		close(db_fd);
 		exit(0);
 	}
@@ -123,192 +88,53 @@ int main (int argc, char **argv)
 		exit(0);
 	}
 
-	PROFILE_FROM(manage_db_thread);
 	db_init(&db, db_fd, status.st_size);
 	pthread_create(&db_loader_thread, NULL, &db_loader_main, (void*)(&db));
-	PROFILE_TO(manage_db_thread);
 
-	/* SURF input image */
-	if (!(input_img = cvLoadImage(argv[1]))) {
-		fprintf(stderr, "Failed to load image, %s\n", argv[1]);
-		close(db_fd);
-		exit(0);
-	}
-	PROFILE_FROM(resize_image);
-	if (input_img->width > RESIZE || input_img->height > RESIZE) {
-		IplImage *resized_img;
-		float ratio = 1;
-		ratio = MIN(RESIZE / (float)input_img->width,
-				RESIZE / (float)input_img->height);
-		resized_img = cvCreateImage(cvSize(ratio * input_img->width,
-					ratio * input_img->height),
-				input_img->depth, input_img->nChannels);
-		cvResize(input_img, resized_img, CV_INTER_LINEAR);
-
-		cvReleaseImage(&input_img);
-		input_img = resized_img;
-	}
-	PROFILE_TO(resize_image);
-
-	PROFILE_FROM(surf_input);
-
-	surfDetDes(input_img, input_ipts, false, 3, 4, 3, SURF_THRESHOLD);
-
-	PROFILE_TO(surf_input);
-
-	cvReleaseImage(&input_img);
-
-	printf("Extracted %lu interesting points from input image\n",
-			input_ipts.size());
-
-	result = (struct _interim *)malloc(
-			input_ipts.size() * sizeof(struct _interim));
-	for (i = 0; i < (int)input_ipts.size(); i++) {
-		result[i].dist_first = FLT_MAX;
-		result[i].dist_second = FLT_MAX;
-		result[i].lat_first = 0;
-		result[i].lng_first = 0;
-	}
-
-	/* Read DB and do searching */
-	db_left = status.st_size;
+	sc_init(&sc, &db);
+	pthread_create(&search_thread, NULL, &sc_main, (void*)(&sc));
 
 	while (1) {
-		haystack_size = MIN(RUN_UNIT, db_left) / sizeof(ipoint_t);
-		haystack_mem_size = haystack_size * sizeof(ipoint_t);
+		printf("> ");
+		fflush(stdout);
 
-		if (haystack_size <= 0)
-			break;
+		if (!gets(img_path))
+			continue;
+		if (img_path[0] == '\0')
+			continue;
 
-		PROFILE_FROM(load_db);
+		/* load input image */
+		if (!(input_img = cvLoadImage(img_path))) {
+			fprintf(stderr, "Failed to load image, %s\n", img_path);
+			continue;
+		}
+		if (input_img->width > RESIZE || input_img->height > RESIZE) {
+			IplImage *resized_img;
+			float ratio = 1;
+			ratio = MIN(RESIZE / (float)input_img->width,
+					RESIZE / (float)input_img->height);
+			resized_img = cvCreateImage(cvSize(ratio * input_img->width,
+						ratio * input_img->height),
+					input_img->depth, input_img->nChannels);
+			cvResize(input_img, resized_img, CV_INTER_LINEAR);
 
-		if (haystack == NULL)
-			haystack = (ipoint_t *)malloc(haystack_mem_size);
-
-		pthread_mutex_lock(&db.mx_db);
-		while (db_readable(&db) < haystack_mem_size) {
-			pthread_cond_wait(&db.cd_reader, &db.mx_db);
+			cvReleaseImage(&input_img);
+			input_img = resized_img;
 		}
 
-		if (db_read(&db, haystack, haystack_mem_size)
-				!= (long long)haystack_mem_size) {
-			fprintf(stderr, "Failed to read database file\n");
-			close(db_fd);
-			exit(0);
+		if (sc_request(&sc, input_img, &callback, (void *)&cb_arg)) {
+			printf("Request failed: %s\n", img_path);
+			cvReleaseImage(&input_img);
 		}
-		else {
-			db_left -= haystack_mem_size;
-			printf("Read %lu / %lu bytes from DB\n",
-					status.st_size - db_left, status.st_size);
-			pthread_cond_signal(&db.cd_writer);
-		}
-		pthread_mutex_unlock(&db.mx_db);
 
-		PROFILE_TO(load_db);
-
-		printf("Finding %lu needles from haystack of %d\n",
-				input_ipts.size(), haystack_size);
-
-		PROFILE_FROM(vec_match);
-
-		search(input_ipts, haystack, haystack_size, result, input_ipts.size(),
-				NUMCPU);
-
-		PROFILE_TO(vec_match);
+		pthread_mutex_lock(&cb_arg.mx_block);
+		pthread_cond_wait(&cb_arg.cd_block, &cb_arg.mx_block);
+		pthread_mutex_unlock(&cb_arg.mx_block);
 	}
-
-	PROFILE_FROM(manage_db_thread);
 
 	db_kill(&db);
-	
 	pthread_join(db_loader_thread, (void **)&dummy);
-
-	PROFILE_TO(manage_db_thread);
-
 	close(db_fd);
-
-	PROFILE_FROM(post_processing);
-
-	for (i = 0; i < (int)input_ipts.size(); i++) {
-		dist_ratio = result[i].dist_first / result[i].dist_second;
-		if (dist_ratio < MATCH_THRESH_SQUARE){
-			found = -1;
-			for (j = 0; j < (int)answer_vec.size(); j++) {
-				if (answer_vec[j].latitude == result[i].lat_first
-						&& answer_vec[j].longitude == result[i].lng_first) {
-					answer_vec[j].score += 1 - dist_ratio;
-					found = 1;
-					break;
-				}
-			}
-
-			if (found < 0) {
-				answer.latitude = result[i].lat_first;
-				answer.longitude = result[i].lng_first;
-				answer.score = 1 - dist_ratio;
-
-				answer_vec.push_back(answer);
-			}
-		}
-	}
-#ifdef GEO_CORRECTION
-	float *correction = (float *)malloc(answer_vec.size() * sizeof(float));
-	memset(correction, 0, answer_vec.size() * sizeof(float));
-	for (i = 0; i < (int)answer_vec.size(); i++) {
-		for (j = 0; j < (int)answer_vec.size(); j++) {
-			if (i == j)
-				continue;
-			if (isClose(answer_vec[i].latitude, answer_vec[i].longitude,
-						answer_vec[j].latitude, answer_vec[j].longitude))
-				correction[i] += answer_vec[j].score;
-		}
-	}
-	for (i = 0; i < (int)answer_vec.size(); i++)
-		answer_vec[i].score += correction[i];
-#endif
-#if 0
-	/* Normalize the score */
-	float mean = 0, square_mean = 0, sigma = 0;
-	for (i = 0; i < (int)answer_vec.size(); i++) {
-		mean += answer_vec[i].score;
-		square_mean += answer_vec[i].score * answer_vec[i].score;
-	}
-	mean /= answer_vec.size();
-	square_mean /= answer_vec.size();
-	sigma = sqrtf(square_mean - (mean * mean));
-	for (i = 0; i < (int)answer_vec.size(); i++)
-		answer_vec[i].score = (answer_vec[i].score - mean) / sigma;
-#else
-	float sum = 0;
-	for (i = 0; i < (int)answer_vec.size(); i++) {
-		sum += answer_vec[i].score;
-	}
-	for (i = 0; i < (int)answer_vec.size(); i++)
-		answer_vec[i].score *= 100 / sum;
-#endif
-	std::sort(answer_vec.begin(), answer_vec.end(), comp_result);
-
-	float max_gap = 0, gap;
-	int cutline = 0;
-	for (i = 1; i < (int)answer_vec.size(); i++) {
-		gap = answer_vec[i-1].score - answer_vec[i].score;
-		if (gap > max_gap) {
-			max_gap = gap;
-			cutline = i;
-		}
-	}
-
-	PROFILE_TO(post_processing);
-
-	PROFILE_END();
-	PROFILE_PRINT(stdout);
-
-	printf("[Result]\n"
-		   "latitude   longitude  score\n");
-	for (i = 0; i < MIN(cutline, answer_vec.size()); i++)
-		printf(FPF_T" "FPF_T" %.3f\n",
-			answer_vec[i].latitude, answer_vec[i].longitude,
-			answer_vec[i].score);
 
 	return 0;
 }
