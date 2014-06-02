@@ -11,8 +11,6 @@
 
 #define MATCH_THRESH_SQUARE (MATCH_THRESH * MATCH_THRESH)
 
-#define BACKLOG 20
-
 typedef struct _result_t {
 	FPF latitude;
 	FPF longitude;

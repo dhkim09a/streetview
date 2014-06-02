@@ -14,6 +14,7 @@
 #include "db.h"
 #include "search.h"
 #include "db_loader.h"
+#include "net.h"
 
 #ifdef PROFILE
 #define PROFILE_ON
@@ -61,7 +62,7 @@ int main (int argc, char **argv)
 	IplImage *input_img;
 	char img_path[MAX_IMG_PATH_LEN] = {0};
 
-	pthread_t db_loader_thread, search_thread;
+	pthread_t db_loader_thread, search_thread, net_thread;
 	db_t db;
 	search_t sc;
 
@@ -93,6 +94,8 @@ int main (int argc, char **argv)
 
 	sc_init(&sc, &db);
 	pthread_create(&search_thread, NULL, &sc_main, (void*)(&sc));
+
+	pthread_create(&net_thread, NULL, &net_main, (void *)(&sc));
 
 	while (1) {
 		printf("> ");

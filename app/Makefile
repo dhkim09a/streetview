@@ -24,7 +24,7 @@ CPU_PROG = cpu.elf
 GPU_PROG = gpu.elf
 HYB_PROG = hyb.elf
 
-SHARED_OBJ = db_loader.o main.o
+SHARED_OBJ = db_loader.o main.o net.o
 SRC_SHARED_OBJ = search.o
 CPU_OBJ = cpu_search.o
 GPU_OBJ = gpu_search.o
@@ -47,6 +47,9 @@ $(HYB_PROG): $(SHARED_OBJ) $(HYB_SHARED_OBJ) $(HYB_OBJ)
 
 %.o: %.cu
 	$(CC) -O0 --use_fast_math $(addprefix -Xcompiler ,$(CFLAGS)) -c $<
+
+%.o: %.c
+	$(CCBIN) -mavx $(CFLAGS) -c $<
 
 %.o: %.cpp
 	$(CCBIN) -mavx $(CFLAGS) -c $<
