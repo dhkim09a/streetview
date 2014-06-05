@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include <cv.h>
 #include <highgui.h>
+#include <sys/time.h>
 
 #include "db.h"
 #include "search.h"
@@ -29,12 +30,17 @@
 
 #define MAX_SOCK           1000
 
-#define HTTP_HDR_A "HTTP/1.1 200 OK\r\nCache-Control: no-cache, no-store, must-revalidate\r\nPragma: no-cache\r\nExpires: 0\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: "
+#define HTTP_HDR_A "HTTP/1.0 200 OK\r\nConnection: close\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: "
 #define HTTP_HDR_B "\r\n\r\n"
+
+#define CLOSE(fd) \
+{int dummy; while(read(fd, &dummy, sizeof(dummy)) > 0);}
 
 typedef struct _cb_arg_t {
 	int sock;
 	fd_set *wfds;
+	int pipe_wkup;
+
 	float latitude;
 	float longitude;
 	float score;
@@ -52,6 +58,9 @@ int ParseHTTPPOST(char *buffer, int buf_len,
 	char *ptr, *ptr_img, *ptr_img_end;
 	int r_cnt = 2;
 	int content_length = 0;
+
+	if (strncmp(buffer, "POST", sizeof("POST") - 1))
+		return -2;
 	if (!(ptr = strstr(buffer, "Content-Length")))
 		return -1;
 	sscanf(ptr, "Content-Length: %d", &content_length);
@@ -203,22 +212,19 @@ callback (req_msg_t *msg, FPF latitude, FPF longitude, float score,
 	cvReleaseImage(&msg->img);
 
 	FD_SET(arg->sock, arg->wfds);
+	while(write(arg->pipe_wkup, "dummy", 1) < 0);
 }
 
 void *net_main (void *arg)
 {
 	search_t *sc = (search_t *)arg;
 
-	struct timeval timeout;
-	timeout.tv_sec = 0;
-	timeout.tv_usec = 1000;
-
 	int listen_fd, new_fd, max_fd;
 	struct sockaddr_in their_addr; /* connector's address information */
 	int sin_size = sizeof(struct sockaddr_in);
 	int do_accept = 0;
 
-	int i, idx;
+	int i, idx, dummy, err;
 
 	char buffer[BUFSIZE] = {0};
 
@@ -247,6 +253,20 @@ void *net_main (void *arg)
 	FD_ZERO(&rfds);
 	FD_ZERO(&wfds);
 
+	int pipe_select[2];
+	if (pipe(pipe_select) == -1) {
+		fprintf(stderr, "Failed to create pipe\n");
+		exit(0);
+	}
+	if (fcntl(pipe_select[0], F_SETFL,
+				fcntl(pipe_select[0], F_GETFL, 0) | O_NONBLOCK)
+			|| fcntl(pipe_select[1], F_SETFL,
+				fcntl(pipe_select[1], F_GETFL, 0) | O_NONBLOCK)) {
+		printf("Setting pipe NON-BLOCK failed\n");
+		exit(0);
+	}
+	FD_SET(pipe_select[0], &rfds);
+
 	/* read response file */
 	if ((resp_file_fd = open(RESP_FILE, O_RDONLY)) < 0) {
 		fprintf(stderr, "Cannot open file, %s\n", RESP_FILE);
@@ -257,12 +277,11 @@ void *net_main (void *arg)
 		exit(0);
 	}
 	resp_file_size = status.st_size;
-	resp_file_buf = (char *)malloc(resp_file_size + 1);
+	resp_file_buf = (char *)malloc(resp_file_size);
 	if (read(resp_file_fd, resp_file_buf, resp_file_size) != resp_file_size) {
 		fprintf(stderr, "Cannot read file, %s\n", RESP_FILE);
 		exit(0);
 	}
-	resp_file_buf[resp_file_size] = '\0';
 	if (!(resp_lat_ptr = strstr(resp_file_buf, "$LAT"))
 			|| !(resp_lng_ptr = strstr(resp_file_buf, "$LNG"))) {
 		fprintf(stderr, "Cannot find $LAT or $LNG from %s\n", RESP_FILE);
@@ -285,11 +304,43 @@ void *net_main (void *arg)
 		rfds_tmp = rfds;
 		wfds_tmp = wfds;
 
-		select(max_fd + 1, &rfds_tmp, &wfds_tmp, NULL, &timeout);
-
+		select(max_fd + 1, &rfds_tmp, &wfds_tmp, NULL, NULL);
+#if 0
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		printf("[%lu]listen: %d, pipe_read: %d, pipe_write: %d\n",
+				tv.tv_sec,
+				listen_fd, pipe_select[0], pipe_select[1]);
+		printf("rfds: ");
+		for (i = 0; i < max_fd + 1 ; i++)
+			if (FD_ISSET(i, &rfds))
+				printf("%d ", i);
+		printf("\n");
+		printf("rfds_tmp: ");
+		for (i = 0; i < max_fd + 1 ; i++)
+			if (FD_ISSET(i, &rfds_tmp))
+				printf("%d ", i);
+		printf("\n");
+		printf("wfds: ");
+		for (i = 0; i < max_fd + 1 ; i++)
+			if (FD_ISSET(i, &wfds))
+				printf("%d ", i);
+		printf("\n");
+		printf("wfds_tmp: ");
+		for (i = 0; i < max_fd + 1 ; i++)
+			if (FD_ISSET(i, &wfds_tmp))
+				printf("%d ", i);
+		printf("\n");
+		printf("\n");
+#endif
 		if (FD_ISSET(listen_fd, &rfds_tmp)) {
 			do_accept = 1;
 			FD_CLR(listen_fd, &rfds_tmp);
+		}
+
+		if (FD_ISSET(pipe_select[0], &rfds_tmp)) {
+			while(read(pipe_select[0], &dummy, sizeof(dummy)) > 0);
+			FD_CLR(pipe_select[0], &rfds_tmp);
 		}
 
 		for (i = 0; i < max_fd + 1; i++) {
@@ -297,13 +348,14 @@ void *net_main (void *arg)
 			if (FD_ISSET(i, &rfds_tmp)) {
 				if ((idx = GetImgBufIdx(i, img_buf_tag)) == -1) {
 					FD_CLR(i, &rfds);
-					close(i);
+					CLOSE(i);
 					continue;
 				}
 
 				if (NET_IMG_SIZE_LIMIT - img_buf_len[idx] <= 0) {
+					ReleaseImgBuf(idx, img_buf_tag, img_buf_len);
 					FD_CLR(i, &rfds);
-					close(i);
+					CLOSE(i);
 					continue;
 				}
 
@@ -312,9 +364,16 @@ void *net_main (void *arg)
 					continue;
 				img_buf_len[idx] += len;
 
-				if (ParseHTTPPOST(img_buf[idx], img_buf_len[idx],
-							&img_ptr, &img_len, &img_name_ptr, &img_name_len))
+				err = ParseHTTPPOST(img_buf[idx], img_buf_len[idx],
+							&img_ptr, &img_len, &img_name_ptr, &img_name_len);
+				if (err == -1)
 					continue;
+				else if (err == -2) {
+					ReleaseImgBuf(idx, img_buf_tag, img_buf_len);
+					FD_CLR(i, &rfds);
+					CLOSE(i);
+					continue;
+				}
 #if 0
 				printf("sock %d: image(%d)-------------\n", i, img_len);
 				for (j = 0; j < img_len; j++) {
@@ -329,15 +388,16 @@ void *net_main (void *arg)
 #endif
 				if ((img = LogAndReadImage(img_ptr, img_len,
 						img_name_ptr, img_name_len)) == NULL) {
-					close(i);
+					FD_CLR(i, &rfds);
 				}
 				else {
 					cb_arg[i].sock = i;
 					cb_arg[i].wfds = &wfds;
+					cb_arg[i].pipe_wkup = pipe_select[1];
 
 					if (sc_request(sc, img, &callback, (void*)&cb_arg[i])) {
 						cvReleaseImage(&img);
-						close(i);
+						CLOSE(i);
 					}
 				}
 
@@ -348,10 +408,12 @@ void *net_main (void *arg)
 			else if (FD_ISSET(i, &wfds_tmp)) {
 				len = SprintHTTPHdr(buffer, resp_file_size);
 				len = send(i, buffer, len, 0);
-				sprintf(resp_lat_ptr, "%10.6f", cb_arg[i].latitude);
-				sprintf(resp_lng_ptr, "%10.6f", cb_arg[i].longitude);
+				len = sprintf(resp_lat_ptr, "%10.6f", cb_arg[i].latitude);
+				resp_lat_ptr[len] = ' ';
+				len = sprintf(resp_lng_ptr, "%10.6f", cb_arg[i].longitude);
+				resp_lng_ptr[len] = ' ';
 				len = send(i, resp_file_buf, resp_file_size, 0);
-				close(i);
+				CLOSE(i);
 				FD_CLR(i, &wfds);
 			}
 		}
@@ -363,7 +425,7 @@ void *net_main (void *arg)
 			}
 			else {
 				if (new_fd >= MAX_SOCK) {
-					close(new_fd);
+					CLOSE(new_fd);
 					continue;
 				}
 				max_fd = max_fd > new_fd ? max_fd : new_fd;
@@ -371,7 +433,7 @@ void *net_main (void *arg)
 				if (fcntl(new_fd, F_SETFL,
 							fcntl(new_fd, F_GETFL, 0) | O_NONBLOCK)) {
 					printf("Setting NON-BLOCK failed\n");
-					close(new_fd);
+					CLOSE(new_fd);
 					continue;
 				}
 			}
