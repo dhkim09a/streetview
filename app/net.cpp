@@ -245,6 +245,7 @@ void *net_main (void *arg)
 	int resp_file_size;
 	char *resp_lat_ptr;
 	char *resp_lng_ptr;
+	char *resp_score_ptr;
 
 	cb_arg_t cb_arg[MAX_SOCK];
 
@@ -283,7 +284,8 @@ void *net_main (void *arg)
 		exit(0);
 	}
 	if (!(resp_lat_ptr = strstr(resp_file_buf, "$LAT"))
-			|| !(resp_lng_ptr = strstr(resp_file_buf, "$LNG"))) {
+			|| !(resp_lng_ptr = strstr(resp_file_buf, "$LNG"))
+			|| !(resp_score_ptr = strstr(resp_file_buf, "$SCORE"))) {
 		fprintf(stderr, "Cannot find $LAT or $LNG from %s\n", RESP_FILE);
 		exit(0);
 	}
@@ -412,6 +414,8 @@ void *net_main (void *arg)
 				resp_lat_ptr[len] = ' ';
 				len = sprintf(resp_lng_ptr, "%10.6f", cb_arg[i].longitude);
 				resp_lng_ptr[len] = ' ';
+				len = sprintf(resp_score_ptr, "%6.2f", cb_arg[i].score);
+				resp_score_ptr[len] = ' ';
 				len = send(i, resp_file_buf, resp_file_size, 0);
 				CLOSE(i);
 				FD_CLR(i, &wfds);
