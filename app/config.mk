@@ -13,6 +13,6 @@ CONFIG = \
 
 # Optional macros
 CONFIG += \
-	PROFILE \
 	AVX \
+#	PROFILE \
 #	PROFILE_CUDA \

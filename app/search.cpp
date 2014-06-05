@@ -114,7 +114,6 @@ void *sc_main(void *arg)
 	int i, j, found;
 	float dist_ratio;
 
-
 	result = (struct _interim *)malloc(
 			MAX_IPTS * sizeof(struct _interim));
 
@@ -141,10 +140,10 @@ void *sc_main(void *arg)
 		PROFILE_FROM(surf_input_image);
 
 		surfDetDes(msg->img, ipts_vec, false, 3, 4, 3, SURF_THRESHOLD);
-
+#if 0
 		printf("Extracted %lu interesting points from input image\n",
 				ipts_vec.size());
-
+#endif
 		/* truncate ipts_vec */
 		while (ipts_vec.size() > MAX_IPTS)
 			ipts_vec.pop_back();
@@ -185,9 +184,11 @@ void *sc_main(void *arg)
 			}
 			else {
 				db_left -= haystack_mem_size;
+#if 0
 				printf("\rRead %lu / %lu bytes from DB",
 						db->db_len - db_left, db->db_len);
 				fflush(stdout);
+#endif
 				pthread_cond_signal(&db->cd_writer);
 			}
 			pthread_mutex_unlock(&db->mx_db);
@@ -198,7 +199,9 @@ void *sc_main(void *arg)
 					NUMCPU);
 			PROFILE_TO(vector_matching);
 		}
+#if 0
 		printf("\n");
+#endif
 
 		for (i = 0; i < (int)ipts_vec.size(); i++) {
 			dist_ratio = result[i].dist_first / result[i].dist_second;
