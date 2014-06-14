@@ -34,7 +34,7 @@
 #define HTTP_HDR_B "\r\n\r\n"
 
 #define CLOSE(fd) \
-{int dummy; while(read(fd, &dummy, sizeof(dummy)) > 0);}
+{int dummy; while(read(fd, &dummy, sizeof(dummy)) > 0); close(fd);}
 
 typedef struct _cb_arg_t {
 	int sock;
@@ -389,10 +389,7 @@ void *net_main (void *arg)
 				printf("\n");
 #endif
 				if ((img = LogAndReadImage(img_ptr, img_len,
-						img_name_ptr, img_name_len)) == NULL) {
-					FD_CLR(i, &rfds);
-				}
-				else {
+						img_name_ptr, img_name_len)) != NULL) {
 					cb_arg[i].sock = i;
 					cb_arg[i].wfds = &wfds;
 					cb_arg[i].pipe_wkup = pipe_select[1];
@@ -417,8 +414,8 @@ void *net_main (void *arg)
 				len = sprintf(resp_score_ptr, "%6.2f", cb_arg[i].score);
 				resp_score_ptr[len] = ' ';
 				len = send(i, resp_file_buf, resp_file_size, 0);
-				CLOSE(i);
 				FD_CLR(i, &wfds);
+				CLOSE(i);
 			}
 		}
 
@@ -437,6 +434,7 @@ void *net_main (void *arg)
 				if (fcntl(new_fd, F_SETFL,
 							fcntl(new_fd, F_GETFL, 0) | O_NONBLOCK)) {
 					printf("Setting NON-BLOCK failed\n");
+					FD_CLR(new_fd, &rfds);
 					CLOSE(new_fd);
 					continue;
 				}
