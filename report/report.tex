@@ -1,0 +1,55 @@
+%
+\documentclass{sig-alternate-10pt}
+\usepackage{subfigure}
+\usepackage{color}
+\usepackage{authblk}
+\usepackage{multirow}
+\usepackage{times}
+\usepackage{amsmath}
+\usepackage{paralist}
+%\usepackage{graphicx}
+%\usepackage{amssymb}
+%\usepackage{bm}
+%\usepackage{ifthen}
+%\usepackage{paralist}
+%\usepackage{cite}
+\usepackage{url}
+%\usepackage{subfigure}
+%\usepackage{threeparttable}
+\input{mymath_mod.tex}
+\begin{document}
+
+\newcommand{\note}[1]{[\textcolor{red}{\textit{#1}}]}
+\newcommand{\eat}[1]{}
+
+\newcommand{\name}{AAA}
+
+\newcommand{\oursection}[1]{\vspace{-.0in}\section{#1}\vspace{-.0in}}
+\newcommand{\oursubsection}[1]{\vspace{-.0in}\subsection{#1}\vspace{-.0in}}
+\newcommand{\oursubsubsection}[1]{\vspace{-.0in}\subsubsection{#1}\vspace{-.0in}}
+\newcommand{\ourcaption}[1]{\vspace{-.0in}\caption{\small #1}\vspace{-0.0in}}
+%\newcommand{\specialcell}[2][c]{%
+%  \begin{tabular}[#1]{@{}c@{}}#2\end{tabular}}
+
+
+\title{Street Art Searching on Street View}
+
+\author{\rm{Donghwi Kim}}
+%\affil{Department of Electrical Engineering, KAIST}
+
+\maketitle
+
+%\input{abstract}
+\input{intro}
+\input{background}
+\input{design}
+\input{implementation}
+\input{eval}
+\input{conclusion}
+\input{discussion}
+
+\bibliographystyle{unsrt}
+\bibliography{report}
+
+\end{document}
+
