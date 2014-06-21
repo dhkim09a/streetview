@@ -32,7 +32,7 @@ __global__ void doSearchKernel (int shared_mem_size, int needle_idx,
 	if (threadIdx.x + needle_idx >= needle_size)
 		return;
 
-	float dist, temp;
+	register float dist;//, temp;
 	int i, j, k;
 	int batch;
 
@@ -79,9 +79,67 @@ __global__ void doSearchKernel (int shared_mem_size, int needle_idx,
 
 		for (i = 0; i < iter; i++) {
 			dist = 0;
-			for (j = 0; j < VEC_DIM; j++) {
-				temp = needle_local.vec[j] - haystack_shared[i].vec[j];
-				dist += temp * temp;
+#if REG >= 128
+			register float hss[0x10];
+			for (j = 0; j < VEC_DIM; j += 0x10)
+#else
+			register float hss[0x8];
+			for (j = 0; j < VEC_DIM; j += 0x8)
+#endif
+			{
+				hss[0x0] = haystack_shared[i].vec[j];
+				hss[0x1] = haystack_shared[i].vec[j + 0x1];
+				hss[0x2] = haystack_shared[i].vec[j + 0x2];
+				hss[0x3] = haystack_shared[i].vec[j + 0x3];
+				hss[0x4] = haystack_shared[i].vec[j + 0x4];
+				hss[0x5] = haystack_shared[i].vec[j + 0x5];
+				hss[0x6] = haystack_shared[i].vec[j + 0x6];
+				hss[0x7] = haystack_shared[i].vec[j + 0x7];
+#if REG >= 128
+				hss[0x8] = haystack_shared[i].vec[j + 0x8];
+				hss[0x9] = haystack_shared[i].vec[j + 0x9];
+				hss[0xA] = haystack_shared[i].vec[j + 0xA];
+				hss[0xB] = haystack_shared[i].vec[j + 0xB];
+				hss[0xC] = haystack_shared[i].vec[j + 0xC];
+				hss[0xD] = haystack_shared[i].vec[j + 0xD];
+				hss[0xE] = haystack_shared[i].vec[j + 0xE];
+				hss[0xF] = haystack_shared[i].vec[j + 0xF];
+#endif
+				dist
+					+= ((needle_local.vec[j] - hss[0x0])
+							* (needle_local.vec[j] - hss[0x0]))
+					+ ((needle_local.vec[j + 0x1] - hss[0x1])
+							* (needle_local.vec[j + 0x1] - hss[0x1]))
+					+ ((needle_local.vec[j + 0x2] - hss[0x2])
+							* (needle_local.vec[j + 0x2] - hss[0x2]))
+					+ ((needle_local.vec[j + 0x3] - hss[0x3])
+							* (needle_local.vec[j + 0x3] - hss[0x3]))
+					+ ((needle_local.vec[j + 0x4] - hss[0x4])
+							* (needle_local.vec[j + 0x4] - hss[0x4]))
+					+ ((needle_local.vec[j + 0x5] - hss[0x5])
+							* (needle_local.vec[j + 0x5] - hss[0x5]))
+					+ ((needle_local.vec[j + 0x6] - hss[0x6])
+							* (needle_local.vec[j + 0x6] - hss[0x6]))
+					+ ((needle_local.vec[j + 0x7] - hss[0x7])
+							* (needle_local.vec[j + 0x7] - hss[0x7]));
+#if REG >= 128
+					+ ((needle_local.vec[j + 0x8] - hss[0x8])
+							* (needle_local.vec[j + 0x8] - hss[0x8]))
+					+ ((needle_local.vec[j + 0x9] - hss[0x9])
+							* (needle_local.vec[j + 0x9] - hss[0x9]))
+					+ ((needle_local.vec[j + 0xA] - hss[0xA])
+							* (needle_local.vec[j + 0xA] - hss[0xA]))
+					+ ((needle_local.vec[j + 0xB] - hss[0xB])
+							* (needle_local.vec[j + 0xB] - hss[0xB]))
+					+ ((needle_local.vec[j + 0xC] - hss[0xC])
+							* (needle_local.vec[j + 0xC] - hss[0xC]))
+					+ ((needle_local.vec[j + 0xD] - hss[0xD])
+							* (needle_local.vec[j + 0xD] - hss[0xD]))
+					+ ((needle_local.vec[j = 0xE] - hss[0xE])
+							* (needle_local.vec[j + 0xE] - hss[0xE]))
+					+ ((needle_local.vec[j + 0xF] - hss[0xF])
+							* (needle_local.vec[j + 0xF] - hss[0xF]));
+#endif
 			}
 			if (dist < interim_temp.dist_first) {
 				interim_temp.lat_first =
@@ -137,9 +195,17 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	cudaDeviceProp device_prop;
 	cudaGetDeviceProperties(&device_prop, DEV_ID);
 
-	unsigned int grid_dim = (unsigned int)device_prop.multiProcessorCount;
+	cudaStream_t *stream;
+
+	unsigned int stream_dim = (unsigned int)device_prop.multiProcessorCount;
+	unsigned int grid_dim = 1;
 	unsigned int block_dim =
 		MIN(needle_size, (unsigned int)device_prop.maxThreadsPerBlock);
+	block_dim = MIN(block_dim, (unsigned int)(device_prop.regsPerBlock / REG));
+
+	stream = (cudaStream_t *)malloc(stream_dim * sizeof(cudaStream_t));
+	for (i = 0; i < (int)stream_dim; i++)
+		cudaStreamCreate(&stream[i]);
 
 	needle_essence_h = (ipoint_essence_t *)malloc(
 			needle_size * sizeof(ipoint_essence_t));
@@ -173,12 +239,6 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 		fprintf(stderr, "cudaMalloc(haystack_d) failed\n");
 		return -1;
 	}
-	if (cudaMemcpy(haystack_d, haystack,
-				haystack_size * sizeof(ipoint_t),
-				cudaMemcpyHostToDevice) != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy(haystack_d, haystack) failed\n");
-		return -1;
-	}
 #ifdef PROFILE_CUDA
 	cudaDeviceSynchronize();
 #endif
@@ -188,31 +248,55 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	 * TODO: Still the result must be copied from device is about
 	 * hundreads of MB. Need to reduce them. */
 	if (cudaMalloc((void **)&interim_d,
-			grid_dim * sizeof(struct _interim) * needle_size) != cudaSuccess) {
+			grid_dim * stream_dim * sizeof(struct _interim) * needle_size) != cudaSuccess) {
 		fprintf(stderr, "cudaMalloc(interim_d) failed\n");
 		return -1;
 	}
 	if (cudaMemset(interim_d, 0,
-				grid_dim * sizeof(struct _interim) * needle_size) != cudaSuccess) {
+				grid_dim * stream_dim * sizeof(struct _interim) * needle_size) != cudaSuccess) {
 		fprintf(stderr, "cudaMemset(interim_d) failed\n");
 		return -1;
 	}
 	interim_h = (struct _interim *)malloc(
-			grid_dim * sizeof(struct _interim) * needle_size);
+			grid_dim * stream_dim * sizeof(struct _interim) * needle_size);
 
+	int stream_haystack_quota = haystack_size / stream_dim;
+	int stream_haystack_size;
+	for (j = 0; j < (int)stream_dim; j++) {
+		stream_haystack_size
+			= (j + 1) * stream_haystack_quota > haystack_size ?
+			(haystack_size % stream_haystack_quota) : stream_haystack_quota;
+
+		if (cudaMemcpyAsync(
+					(ipoint_t *)(&haystack_d[stream_haystack_quota * j]),
+					(ipoint_t *)(&haystack[stream_haystack_quota * j]),
+					stream_haystack_size * sizeof(ipoint_t),
+					cudaMemcpyHostToDevice, stream[j]) != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy(haystack_d, haystack) failed\n");
+			return -1;
+		}
+	}
 	for (i = 0; i <= needle_size / block_dim; i++) {
 
 		PROFILE_FROM(run_kernel);
 		/* Run CUDA kernel */
-		doSearchKernel <<<
-			grid_dim,
-			(block_dim * (i + 1)) > needle_size ?
-				(needle_size % block_dim) : block_dim,
-			device_prop.sharedMemPerBlock >>>
-			(device_prop.sharedMemPerBlock, i * block_dim,
-			 needle_essence_d, needle_size,
-			 haystack_d, haystack_size,
-			 interim_d, needle_size);
+		for (j = 0; j < (int)stream_dim; j++) {
+		stream_haystack_size
+			= (j + 1) * stream_haystack_quota > haystack_size ?
+			(haystack_size % stream_haystack_quota) : stream_haystack_quota;
+
+			doSearchKernel <<<
+				grid_dim,
+				(block_dim * (i + 1)) > needle_size ?
+					(needle_size % block_dim) : block_dim,
+				device_prop.sharedMemPerBlock,
+				stream[j] >>>
+					(device_prop.sharedMemPerBlock, i * block_dim,
+					 needle_essence_d, needle_size,
+					 (ipoint_t *)(&haystack_d[stream_haystack_quota * j]),
+					 stream_haystack_size,
+					 &interim_d[needle_size * j], needle_size);
+		}
 #ifdef PROFILE_CUDA
 		cudaDeviceSynchronize();
 #endif
@@ -223,7 +307,7 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	PROFILE_FROM(copy_result);
 	/* Copy result to host */
 	err = cudaMemcpy(interim_h, interim_d,
-			grid_dim * sizeof(struct _interim) * needle_size,
+			grid_dim * stream_dim * sizeof(struct _interim) * needle_size,
 			cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) {
 		fprintf(stderr, "cudaMemcpy(interim_h, interim_d): %s\n",
@@ -238,7 +322,7 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	PROFILE_FROM(post_processing);
 	iter = MIN((int)needle.size(), result_size);
 	for (i = 0; i < iter; i++) {
-		for (j = 0; j < (int)grid_dim; j++) {
+		for (j = 0; j < (int)(grid_dim * stream_dim); j++) {
 			if (result[i].dist_first == FLT_MAX) {
 				result[i].lat_first =
 					interim_h[(j * needle_size) + i].lat_first;

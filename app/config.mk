@@ -1,6 +1,10 @@
 
+#REG per a GPU thread
+REG = 64
+
 # Essential macros
 CONFIG = \
+	REG=$(REG) \
 	RUN_UNIT=300000000 \
 	MEM_LIMIT=2000000000 \
 	CHUNK_SIZE=30000000 \

@@ -8,6 +8,7 @@ include $(CONFIG_MK)
 CCBIN = gcc
 CC = nvcc -ccbin $(CCBIN)
 
+CUFLAGS = -O0 --use_fast_math -lineinfo --maxrregcount=$(REG)
 CFLAGS = -O2 -Wall -I../openSURF/src -I../dbmaker -g \
 		 $(shell pkg-config --cflags opencv)
 CFLAGS += -Wno-unused-function
@@ -46,7 +47,7 @@ $(HYB_PROG): $(SHARED_OBJ) $(HYB_SHARED_OBJ) $(HYB_OBJ)
 	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
 
 %.o: %.cu
-	$(CC) -O0 --use_fast_math $(addprefix -Xcompiler ,$(CFLAGS)) -c $<
+	$(CC) $(CUFLAGS) $(addprefix -Xcompiler ,$(CFLAGS)) -c $<
 
 %.o: %.c
 	$(CCBIN) -mavx $(CFLAGS) -c $<
