@@ -1,6 +1,10 @@
 
+#REG per a GPU thread
+REG = 64
+
 # Essential macros
 CONFIG = \
+	REG=$(REG) \
 	LAT_MPD=111133 \
 	LNG_MPD=93156 \
 	MEM_LIMIT=1500000000 \
