@@ -11,7 +11,7 @@
 	\label{fig:crawled_area}
 \end{figure}
 
-We choose Valparaiso, Chile as an target city to verify \name{}.
+We choose Valparaiso, Chile as an target city to evaluate \name{}.
 As shown in Figure~\ref{fig:crawled_area}, some area of Valparaiso is selected as UNESCO World Heritage because of its street arts.
 Generated DB from street view images of carefully selected one square Km area including the world heritage.
 We have done some experiments to prove that \name{} speeds up image searching and finally lower the searching cost enough to serve the service on web.
@@ -19,7 +19,7 @@ We have done some experiments to prove that \name{} speeds up image searching an
 \oursubsection{Generating DB}
 Google Maps provides an API to download street view images.
 Allowed maximum field of view, FOV, is 120 degree so three images are needed to retrieve single stationary point.
-We downloaded 30,000 street view images with Google Maps APIs and removed duplicated to get 12,129 unique street view images.
+We downloaded 30,000 street view images with Google Maps APIs and removed duplicants to obtain 12,129 unique street view images.
 Then we SURFed each image and generated DB file.
 The DB file was 1.2 GB large and consists of 4.4 million feature vectors.
 
@@ -42,6 +42,6 @@ Figure~\ref{fig:speed_up} shows the result.
 We can observe that AVX optimization speeds up performance of single CPU core 3.25 times.
 This is smaller than we expected (8 times) because an AVX instructions cannot be done in single cycle of CPU while normal floating point calculation can.
 Another interesting observation is that GPU searching is two times faster than multi-threaded and AVX-optimized CPU search.
-Lastly, hybrid search achieves 38 times faster speed than single-threaded search (165 seconds to 4.3 seconds).
+Lastly, a hybrid search, which uses both CPU and GPU, achieves 38 times faster speed than single-threaded search (165 seconds to 4.3 seconds).
 
 %\oursubsection{Correctness}

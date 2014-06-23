@@ -1,12 +1,7 @@
 
 \oursection{Background}
 
-\oursubsection{Google Street View}
-Google Maps provides Street-view service\cite{streetview} which shows panoramic views of streets over the world.
-Anyone can download the street-view images of any locations by using Google APIs
-Since it was launched on May 25, 2007, area covered by street view is steadly growed. For instance, 25 million stationary points are covering most of cities in UK.
-Most of street arts can be found in Google Street View.
-
+%\oursubsection{Google Street View}
 \oursubsection{OpenSURF}
 Speeded Up Robust Feature, SURF\cite{surf}, is an image searching algorithm which is robust to rotation, scaling, distortion, brightness change and covering.
 SURF selects interesting points and extract feature which is 64-dimensional vector describes interesting point and nearby pixels.
@@ -14,7 +9,7 @@ OpenSURF\cite{opensurf} is an open-source SURF library based on openCV\cite{open
 \name{} use it to extract features from images.
 
 \oursubsection{Vector Matching}
-Needle and haystack denotes a set of feature vectors extracted from an image we are looking for and taget images of searching, respectively.
+Needle and haystack denote a set of feature vectors extracted from an image we are looking for and taget images of searching, respectively.
 Finding a needle from a haystack is done by vector matching.
-A vector of haystack which have the smallest eucladian distance with a vector of needle is selected as matched vector for that vector of needle.
+A vector of haystack which has the smallest eucladian distance with a vector of needle is selected as matched vector for that vector of needle.
 It is allowd to match one vector of haystack with two or more different vectors of needle however this happens very rarely because haystack is typically more than $10^3$ times larget than needle.
