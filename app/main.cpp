@@ -89,7 +89,7 @@ int main (int argc, char **argv)
 		exit(0);
 	}
 
-	db_init(&db, db_fd, status.st_size);
+	db_init(&db, db_fd, status.st_size, sizeof(ipoint_t));
 	pthread_create(&db_loader_thread, NULL, &db_loader_main, (void*)(&db));
 
 	sc_init(&sc, &db);

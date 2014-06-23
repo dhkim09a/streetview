@@ -109,6 +109,7 @@ void *sc_main(void *arg)
 	ipoint_t *haystack = NULL;
 	int haystack_size; /* number of entries in haystack */
 	size_t haystack_mem_size;
+	int haystack_read;
 	size_t db_left;
 
 	int i, j, found;
@@ -177,27 +178,18 @@ void *sc_main(void *arg)
 				pthread_cond_wait(&db->cd_reader, &db->mx_db);
 			}
 
-			if (db_read(db, haystack, haystack_mem_size)
-					!= (long long)haystack_mem_size) {
-				fprintf(stderr, "Failed to read database file\n");
-				exit(0);
-			}
-			else {
-				db_left -= haystack_mem_size;
-#if 0
-				printf("\rRead %lu / %lu bytes from DB",
-						db->db_len - db_left, db->db_len);
-				fflush(stdout);
-#endif
-				pthread_cond_signal(&db->cd_writer);
-			}
+			haystack_read = db_acquire(db, 
+					(void **)&haystack, haystack_mem_size);
+			db_left -= haystack_read;
+			pthread_cond_signal(&db->cd_writer);
 			pthread_mutex_unlock(&db->mx_db);
 			PROFILE_TO(load_database);
 
 			PROFILE_FROM(vector_matching);
-			search(ipts_vec, haystack, haystack_size, result, ipts_vec.size(),
-					NUMCPU);
+			search(ipts_vec, haystack, haystack_read / sizeof(ipoint_t),
+					result, ipts_vec.size(), NUMCPU);
 			PROFILE_TO(vector_matching);
+			db_release(db, haystack, haystack_read);
 		}
 #if 0
 		printf("\n");

@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <assert.h>
 
 #include "db_loader.h"
 
@@ -20,20 +21,145 @@
 #define SUB(large, small, mod) \
 	((large) >= (small) ? (large) - (small) : (mod) - ((small) - (large) - 1))
 
-int db_init(db_t *db, int fd, size_t db_len)
+#if 0
+#define pthread_cond_wait(args...) \
+	printf("COND_WAIT: %s %d\n", __func__, __LINE__); \
+pthread_cond_wait(args)
+
+#define pthread_mutex_unlock(args...) \
+	printf("UNLOCK: %s %d\n", __func__, __LINE__); \
+pthread_mutex_unlock(args)
+
+#define pthread_mutex_lock(args...) \
+	printf("LOCK: %s %d\n", __func__, __LINE__); \
+pthread_mutex_lock(args)
+#endif
+
+/* Assume big endian for convenience
+ *      [0]          [1]      ...
+ * [LSB ... MSB][LSB ... MSB] ... */
+#define BITMAP_SET(_bitmap, from, to) \
+	do { int i; uint8_t *bitmap = (uint8_t *)(_bitmap); \
+		assert((from) < (to)); \
+		if (((from) / 8) == ((to) / 8)) { \
+			for (i = (from); i < (to); i++) \
+			bitmap[i / 8] \
+			|= i % 8 == 0 ? 0x01 \
+			: i % 8 == 1 ? 0x02 \
+			: i % 8 == 2 ? 0x04 \
+			: i % 8 == 3 ? 0x08 \
+			: i % 8 == 4 ? 0x10 \
+			: i % 8 == 5 ? 0x20 \
+			: i % 8 == 6 ? 0x40 : 0x80; \
+		} \
+		else { \
+			bitmap[(from) / 8] \
+			|= (from) % 8 == 0 ? 0xFF \
+			: (from) % 8 == 1 ? 0xFE \
+			: (from) % 8 == 2 ? 0xFC \
+			: (from) % 8 == 3 ? 0xF8 \
+			: (from) % 8 == 4 ? 0xF0 \
+			: (from) % 8 == 5 ? 0xE0 \
+			: (from) % 8 == 6 ? 0xC0 : 0x80; \
+			for (i = ((from) / 8) + 1; i < ((to) / 8); i++) \
+			bitmap[i] |= 0xFF; \
+			bitmap[(to) / 8] \
+			|= (to) % 8 == 0 ? 0x00 \
+			: (to) % 8 == 1 ? 0x01 \
+			: (to) % 8 == 2 ? 0x03 \
+			: (to) % 8 == 3 ? 0x07 \
+			: (to) % 8 == 4 ? 0x0F \
+			: (to) % 8 == 5 ? 0x1F \
+			: (to) % 8 == 6 ? 0x3F : 0x7F; \
+		} \
+	} while (0);
+#define BITMAP_CLR(_bitmap, from, to) \
+	do { int i; uint8_t *bitmap = (uint8_t *)(_bitmap); \
+		assert((from) < (to)); \
+		if (((from) / 8) == ((to) / 8)) { \
+			for (i = (from); i < (to); i++) \
+			bitmap[i / 8] \
+			&= i % 8 == 0 ? 0xFE \
+			: i % 8 == 1 ? 0xFD \
+			: i % 8 == 2 ? 0xFB \
+			: i % 8 == 3 ? 0xF7 \
+			: i % 8 == 4 ? 0xEF \
+			: i % 8 == 5 ? 0xDF \
+			: i % 8 == 6 ? 0xBF : 0x7F; \
+		} \
+		else { \
+			bitmap[from / 8] \
+			&= (from) % 8 == 0 ? 0x00 \
+			: (from) % 8 == 1 ? 0x01 \
+			: (from) % 8 == 2 ? 0x03 \
+			: (from) % 8 == 3 ? 0x07 \
+			: (from) % 8 == 4 ? 0x0F \
+			: (from) % 8 == 5 ? 0x1F \
+			: (from) % 8 == 6 ? 0x3F : 0x7F; \
+			for (i = ((from) / 8) + 1; i < ((to) / 8); i++) \
+			bitmap[i] &= 0x00; \
+			bitmap[(to) / 8] \
+			&= (to) % 8 == 0 ? 0xFF \
+			: (to) % 8 == 1 ? 0xFE \
+			: (to) % 8 == 2 ? 0xFC \
+			: (to) % 8 == 3 ? 0xF8 \
+			: (to) % 8 == 4 ? 0xF0 \
+			: (to) % 8 == 5 ? 0xE0 \
+			: (to) % 8 == 6 ? 0xC0 : 0x80; \
+		} \
+	} while (0);
+#define BITMAP_LEN_ZEROS(_bitmap, from, until, len) \
+	do { int i; uint8_t temp; uint8_t *bitmap = (uint8_t *)(_bitmap); \
+		assert((until) >= (from)); \
+		if ((temp = (0xFF << ((from) % 8)) & bitmap[(from) / 8])) { \
+			len = (temp & 0x01) ? 0 \
+			: (temp & 0x03) ? 1 \
+			: (temp & 0x07) ? 2 \
+			: (temp & 0x0F) ? 3 \
+			: (temp & 0x1F) ? 4 \
+			: (temp & 0x3F) ? 5 \
+			: (temp & 0x7F) ? 6 : 7; \
+			len -= (from) % 8; \
+		} \
+		else { \
+			for (i = ((from) / 8) + 1; i < ((until) / 8); i++) \
+			if (bitmap[i] != 0) break; \
+			if (i == ((until) / 8)) \
+				(len) = (until) - (from); \
+			else { \
+				(len) = (i * 8) - (from) \
+				+ ((bitmap[i] & 0x01) ? 0 \
+						: (bitmap[i] & 0x03) ? 1 \
+						: (bitmap[i] & 0x07) ? 2 \
+						: (bitmap[i] & 0x0F) ? 3 \
+						: (bitmap[i] & 0x1F) ? 4 \
+						: (bitmap[i] & 0x3F) ? 5 \
+						: (bitmap[i] & 0x7F) ? 6 : 7); \
+			} \
+		} \
+	} while (0)
+
+int db_init(db_t *db, int fd, size_t db_len, int align)
 {
 	db->fd = fd;
 	db->db_len = db_len;
+	db->align = align;
 	
 	/* head is always smaller than tail */
 	db->head = 0;
 	db->tail = 0;
-	db->buffer_len = MEM_LIMIT;
-	if (!(db->buffer = (ipoint_t *)malloc(db->buffer_len))) {
-		fprintf(stderr, "%s:%d: Failed to allocate shard pool\n",
+	db->buffer_len = (MEM_LIMIT / align) * align;
+	if (!(db->buffer = (uint8_t *)malloc(db->buffer_len))) {
+		fprintf(stderr, "%s:%d: Failed to allocate buffer\n",
 				__func__, __LINE__);
 		exit(0);
 	}
+	if (!(db->bitmap = (uint8_t *)malloc((db->buffer_len / align / 8) + 1))) {
+		fprintf(stderr, "%s:%d: Failed to allocate bitmap\n",
+				__func__, __LINE__);
+		exit(0);
+	}
+	memset(db->bitmap, 0xFF, (db->buffer_len / align / 8) + 1);
 
 	db->expired = 0;
 
@@ -49,6 +175,7 @@ size_t db_readable(db_t *db)
 	return SUB(db->tail, db->head, ROUND);
 }
 
+/* db_read: DEPRECATED */
 size_t db_read(db_t *db, void *buffer, size_t len)
 {
 	size_t readable = MIN(db_readable(db), len);
@@ -73,6 +200,61 @@ size_t db_read(db_t *db, void *buffer, size_t len)
 	return readable;
 }
 
+size_t db_acquire(db_t *db, void **ptr, size_t len)
+{
+	size_t readable = MIN(db_readable(db), len);
+	readable = (readable / db->align) * db->align;
+
+	if (readable == 0)
+		return 0;
+
+	size_t from, to;
+	from = db->head % db->buffer_len;
+	to = ADD(db->head, readable, ROUND) % db->buffer_len;
+
+	*ptr = db->buffer + from;
+	if (to < from)
+		readable = db->buffer_len - from;
+#if 0
+	printf("head: %lu, tail: %lu, acquired %lu - %lu, buffer_len: %lu\n",
+			db->head, db->tail,
+			(size_t)*ptr - (size_t)db->buffer,
+			readable + (size_t)*ptr - (size_t)db->buffer,
+			db->buffer_len);
+	fflush(stdout);
+#endif
+
+	return readable;
+}
+
+void db_release(db_t *db, void *ptr, size_t len)
+{
+	size_t temp = 0;
+#if 0
+	printf("head: %lu, tail: %lu, released %lu - %lu, buffer_len: %lu\n",
+			db->head, db->tail,
+			(size_t)ptr - (size_t)db->buffer,
+			len + (size_t)ptr - (size_t)db->buffer,
+			db->buffer_len);
+	fflush(stdout);
+#endif
+	size_t offset = (size_t)ptr - (size_t)db->buffer;
+
+	BITMAP_CLR(db->bitmap, offset / db->align, (offset + len) / db->align);
+
+	size_t from;
+	from = db->head % db->buffer_len;
+
+	BITMAP_LEN_ZEROS(db->bitmap, from / db->align, db->buffer_len / db->align,
+			len);
+	if (len * db->align + from == db->buffer_len) {
+		BITMAP_LEN_ZEROS(db->bitmap,
+				0, db->buffer_len / db->align, temp);
+		len += temp;
+	}
+	db->head = ADD(db->head, len * db->align, ROUND);
+}
+
 size_t db_writable(db_t *db)
 {
 	size_t readable = db_readable(db);
@@ -84,7 +266,7 @@ size_t db_writable(db_t *db)
 size_t db_write(db_t *db, void *buffer, size_t len)
 {
 	size_t writable = MIN(db_writable(db), len);
-
+	writable = (writable / db->align) * db->align;
 	if (writable == 0)
 		return 0;
 
@@ -94,10 +276,15 @@ size_t db_write(db_t *db, void *buffer, size_t len)
 
 	if (from < to) {
 		memcpy((uint8_t *)db->buffer + from, buffer, to - from);
+		BITMAP_SET(db->bitmap, from / db->align, to / db->align);
 	}
 	else {
 		memcpy((uint8_t *)db->buffer + from, buffer, db->buffer_len - from);
-		memcpy(db->buffer, (uint8_t *)buffer + db->buffer_len - from, to);
+		BITMAP_SET(db->bitmap, from / db->align, db->buffer_len / db->align);
+		if (to != 0) {
+			memcpy(db->buffer, (uint8_t *)buffer + db->buffer_len - from, to);
+			BITMAP_SET(db->bitmap, 0, to / db->align);
+		}
 	}
 
 	db->tail = ADD(db->tail, writable, ROUND);
@@ -134,8 +321,9 @@ void *db_loader_main(void *arg_void)
 	size_t db_left = db->db_len, db_try_read;
 	size_t buffer_left = 0;
 	int buffer_offset = -1, written;
+	size_t disk_read_at_once = (DISK_READ_AT_ONCE / db->align) * db->align;
 
-	if (!(buffer = (uint8_t *)malloc(DISK_READ_AT_ONCE))) {
+	if (!(buffer = (uint8_t *)malloc(disk_read_at_once))) {
 		fprintf(stderr, "%s:%d: Failed to allocate buffer\n",
 				__func__, __LINE__);
 		exit(0);
@@ -146,7 +334,7 @@ void *db_loader_main(void *arg_void)
 			break;
 
 		pthread_mutex_lock(&db->mx_db);
-		if (MIN(buffer_offset == -1 ? DISK_READ_AT_ONCE : buffer_left,
+		if (MIN(buffer_offset == -1 ? disk_read_at_once : buffer_left,
 						db_writable(db)) <= 0) {
 			pthread_cond_wait(&db->cd_writer, &db->mx_db);
 			pthread_mutex_unlock(&db->mx_db);
@@ -156,7 +344,7 @@ void *db_loader_main(void *arg_void)
 
 		/* read db from disk */
 		if (buffer_offset == -1) {
-			db_try_read = MIN(db_left, DISK_READ_AT_ONCE);
+			db_try_read = MIN(db_left, disk_read_at_once);
 			if (read(db->fd, buffer, db_try_read)
 					!= (int)db_try_read) {
 				fprintf(stderr, "Failed to read database file\n");
