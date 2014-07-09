@@ -23,15 +23,19 @@
 
 #if 0
 #define pthread_cond_wait(args...) \
-	printf("COND_WAIT: %s %d\n", __func__, __LINE__); \
+	printf("WAIT(%s): %s %d\n", #args, __func__, __LINE__); \
 pthread_cond_wait(args)
 
+#define pthread_cond_signal(args...) \
+	printf("SIGNAL(%s): %s %d\n", #args, __func__, __LINE__); \
+pthread_cond_signal(args)
+
 #define pthread_mutex_unlock(args...) \
-	printf("UNLOCK: %s %d\n", __func__, __LINE__); \
+	printf("UNLOCK(%s): %s %d\n", #args, __func__, __LINE__); \
 pthread_mutex_unlock(args)
 
 #define pthread_mutex_lock(args...) \
-	printf("LOCK: %s %d\n", __func__, __LINE__); \
+	printf("LOCK(%s): %s %d\n", #args, __func__, __LINE__); \
 pthread_mutex_lock(args)
 #endif
 
@@ -138,6 +142,36 @@ pthread_mutex_lock(args)
 			} \
 		} \
 	} while (0)
+#define BITMAP_LEN_ONES(_bitmap, from, until, len) \
+	do { int i; uint8_t temp; uint8_t *bitmap = (uint8_t *)(_bitmap); \
+		assert((until) >= (from)); \
+		if ((temp = (0xFF << ((from) % 8)) & ~bitmap[(from) / 8])) { \
+			len = (temp & 0x01) ? 0 \
+			: (temp & 0x03) ? 1 \
+			: (temp & 0x07) ? 2 \
+			: (temp & 0x0F) ? 3 \
+			: (temp & 0x1F) ? 4 \
+			: (temp & 0x3F) ? 5 \
+			: (temp & 0x7F) ? 6 : 7; \
+			len -= (from) % 8; \
+		} \
+		else { \
+			for (i = ((from) / 8) + 1; i < ((until) / 8); i++) \
+			if (bitmap[i] != 0xFF) {break;} \
+			if (i == ((until) / 8)) \
+				(len) = (until) - (from); \
+			else { \
+				(len) = (i * 8) - (from) \
+				+ ((~bitmap[i] & 0x01) ? 0 \
+						: (~bitmap[i] & 0x03) ? 1 \
+						: (~bitmap[i] & 0x07) ? 2 \
+						: (~bitmap[i] & 0x0F) ? 3 \
+						: (~bitmap[i] & 0x1F) ? 4 \
+						: (~bitmap[i] & 0x3F) ? 5 \
+						: (~bitmap[i] & 0x7F) ? 6 : 7); \
+			} \
+		} \
+	} while (0)
 
 int db_init(db_t *db, int fd, size_t db_len, int align)
 {
@@ -147,6 +181,7 @@ int db_init(db_t *db, int fd, size_t db_len, int align)
 	
 	/* head is always smaller than tail */
 	db->head = 0;
+	db->middle = 0;
 	db->tail = 0;
 	db->buffer_len = (MEM_LIMIT / align) * align;
 	if (!(db->buffer = (uint8_t *)malloc(db->buffer_len))) {
@@ -159,7 +194,7 @@ int db_init(db_t *db, int fd, size_t db_len, int align)
 				__func__, __LINE__);
 		exit(0);
 	}
-	memset(db->bitmap, 0xFF, (db->buffer_len / align / 8) + 1);
+	memset(db->bitmap, 0, (db->buffer_len / align / 8) + 2);
 
 	db->expired = 0;
 
@@ -172,32 +207,22 @@ int db_init(db_t *db, int fd, size_t db_len, int align)
 
 size_t db_readable(db_t *db)
 {
-	return SUB(db->tail, db->head, ROUND);
+	size_t len;
+	size_t from = db->middle % db->buffer_len;
+	size_t to = db->tail % db->buffer_len;
+	to = ((from < to) ? to : db->buffer_len);
+	BITMAP_LEN_ONES(db->bitmap, from / db->align, to / db->align, len);
+	return len * db->align;
 }
 
-/* db_read: DEPRECATED */
-size_t db_read(db_t *db, void *buffer, size_t len)
+size_t db_writable(db_t *db)
 {
-	size_t readable = MIN(db_readable(db), len);
-
-	if (readable == 0)
-		return 0;
-
-	size_t from, to;
-	from = db->head % db->buffer_len;
-	to = ADD(db->head, readable, ROUND) % db->buffer_len;
-
-	if (from < to) {
-		memcpy(buffer, (uint8_t *)db->buffer + from, to - from);
-	}
-	else {
-		memcpy(buffer, (uint8_t *)db->buffer + from, db->buffer_len - from);
-		memcpy((uint8_t *)buffer + db->buffer_len - from, db->buffer, to);
-	}
-
-	db->head = ADD(db->head, readable, ROUND);
-
-	return readable;
+	size_t len;
+	size_t from = db->tail % db->buffer_len;
+	size_t to = db->head % db->buffer_len;
+	to = ((from < to) ? to : db->buffer_len);
+	BITMAP_LEN_ZEROS(db->bitmap, from / db->align, to / db->align, len);
+	return len * db->align;
 }
 
 size_t db_acquire(db_t *db, void **ptr, size_t len)
@@ -209,15 +234,18 @@ size_t db_acquire(db_t *db, void **ptr, size_t len)
 		return 0;
 
 	size_t from, to;
-	from = db->head % db->buffer_len;
-	to = ADD(db->head, readable, ROUND) % db->buffer_len;
+	from = db->middle % db->buffer_len;
+	db->middle = ADD(db->middle, readable, ROUND);
+	to = db->middle % db->buffer_len;
 
 	*ptr = db->buffer + from;
 	if (to < from)
 		readable = db->buffer_len - from;
 #if 0
-	printf("head: %lu, tail: %lu, acquired %lu - %lu, buffer_len: %lu\n",
-			db->head, db->tail,
+	printf("head: %lu, middle: %lu, tail: %lu, \n"
+			"acquired %lu - %lu, buffer_len: %lu\n"
+			"-----------------------------------------------------\n",
+			db->head, db->middle, db->tail,
 			(size_t)*ptr - (size_t)db->buffer,
 			readable + (size_t)*ptr - (size_t)db->buffer,
 			db->buffer_len);
@@ -229,10 +257,11 @@ size_t db_acquire(db_t *db, void **ptr, size_t len)
 
 void db_release(db_t *db, void *ptr, size_t len)
 {
-	size_t temp = 0;
 #if 0
-	printf("head: %lu, tail: %lu, released %lu - %lu, buffer_len: %lu\n",
-			db->head, db->tail,
+	printf("head: %lu, middle: %lu, tail: %lu, \n"
+			"released %lu - %lu, buffer_len: %lu\n"
+			"-----------------------------------------------------\n",
+			db->head, db->middle, db->tail,
 			(size_t)ptr - (size_t)db->buffer,
 			len + (size_t)ptr - (size_t)db->buffer,
 			db->buffer_len);
@@ -242,7 +271,7 @@ void db_release(db_t *db, void *ptr, size_t len)
 
 	BITMAP_CLR(db->bitmap, offset / db->align, (offset + len) / db->align);
 
-	size_t from;
+	size_t from, temp = 0;
 	from = db->head % db->buffer_len;
 
 	BITMAP_LEN_ZEROS(db->bitmap, from / db->align, db->buffer_len / db->align,
@@ -253,14 +282,10 @@ void db_release(db_t *db, void *ptr, size_t len)
 		len += temp;
 	}
 	db->head = ADD(db->head, len * db->align, ROUND);
-}
 
-size_t db_writable(db_t *db)
-{
-	size_t readable = db_readable(db);
-	if (readable >= db->buffer_len)
-		return 0;
-	return SUB(db->buffer_len, readable, ROUND);
+	pthread_mutex_lock(&db->mx_db);
+	pthread_cond_signal(&db->cd_writer);
+	pthread_mutex_unlock(&db->mx_db);
 }
 
 size_t db_write(db_t *db, void *buffer, size_t len)

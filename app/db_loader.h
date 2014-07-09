@@ -13,6 +13,7 @@ typedef struct _db_t {
 
 	int align;
 	size_t head;
+	size_t middle;
 	size_t tail;
 	uint8_t *buffer;
 	size_t buffer_len;
@@ -28,11 +29,8 @@ typedef struct _db_t {
 
 int db_init(db_t *db, int fd, size_t db_len, int align);
 size_t db_readable(db_t *db);
-//size_t db_read(db_t *db, void *buffer, size_t len);
 size_t db_acquire(db_t *db, void **ptr, size_t len);
 void db_release(db_t *db, void *ptr, size_t len);
-size_t db_writable(db_t *db);
-size_t db_write(db_t *db, void *buffer, size_t len);
 void *db_loader_main(void *arg_void);
 void db_kill(db_t *db);
 #endif /* __DB_LOADER_H_ */
