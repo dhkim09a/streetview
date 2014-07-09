@@ -17,36 +17,18 @@ LDFLAGS = $(shell pkg-config --libs opencv) \
 
 CFLAGS += $(addprefix -D,$(CONFIG))
 
-CFLAG_CPU = -Dsearch=searchCPU
-CFLAG_GPU = -Dsearch=searchGPU
-CFLAG_HYB = -Dsearch=searchHyb
+PROG = curator.elf
 
-CPU_PROG = cpu.elf
-GPU_PROG = gpu.elf
-HYB_PROG = hyb.elf
+OBJS = db_loader.o main.o message.o \
+			 search.o cpu_search.o gpu_search.o \
+			 #net.o
 
-SHARED_OBJ = db_loader.o main.o net.o
-SRC_SHARED_OBJ = search.o
-CPU_OBJ = cpu_search.o
-GPU_OBJ = gpu_search.o
-HYB_OBJ = hyb_search.o $(CPU_OBJ) $(GPU_OBJ)
+all: $(PROG)
 
-CPU_SHARED_OBJ = $(addprefix c_,$(SRC_SHARED_OBJ))
-GPU_SHARED_OBJ = $(addprefix g_,$(SRC_SHARED_OBJ))
-HYB_SHARED_OBJ = $(addprefix h_,$(SRC_SHARED_OBJ))
+$(PROG): $(OBJS)
+	$(CC) -g -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
 
-all: $(HYB_PROG) $(CPU_PROG) $(GPU_PROG)
-
-$(CPU_PROG): $(SHARED_OBJ) $(CPU_SHARED_OBJ) $(CPU_OBJ)
-	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
-
-$(GPU_PROG): $(SHARED_OBJ) $(GPU_SHARED_OBJ) $(GPU_OBJ)
-	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
-
-$(HYB_PROG): $(SHARED_OBJ) $(HYB_SHARED_OBJ) $(HYB_OBJ)
-	$(CC) -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
-
-%.o: %.cu
+%.o: %.cu 
 	$(CC) $(CUFLAGS) $(addprefix -Xcompiler ,$(CFLAGS)) -c $<
 
 %.o: %.c
@@ -54,15 +36,6 @@ $(HYB_PROG): $(SHARED_OBJ) $(HYB_SHARED_OBJ) $(HYB_OBJ)
 
 %.o: %.cpp
 	$(CCBIN) -mavx $(CFLAGS) -c $<
-
-$(CPU_SHARED_OBJ): $(addsuffix .cpp, $(basename $(SRC_SHARED_OBJ)))
-	$(CCBIN) -mavx $(CFLAG_CPU) $(CFLAGS) -c $< -o $@
-
-$(GPU_SHARED_OBJ): $(addsuffix .cpp, $(basename $(SRC_SHARED_OBJ)))
-	$(CCBIN) -mavx $(CFLAG_GPU) $(CFLAGS) -c $< -o $@
-
-$(HYB_SHARED_OBJ): $(addsuffix .cpp, $(basename $(SRC_SHARED_OBJ)))
-	$(CCBIN) -mavx $(CFLAG_HYB) $(CFLAGS) -c $< -o $@
 
 clean:
 	rm -f *.o

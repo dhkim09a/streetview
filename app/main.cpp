@@ -15,6 +15,7 @@
 #include "search.h"
 #include "db_loader.h"
 #include "net.h"
+#include "message.h"
 
 #ifdef PROFILE
 #define PROFILE_ON
@@ -33,16 +34,17 @@ typedef struct _cb_arg_t {
 	pthread_cond_t cd_block;
 } cb_arg_t;
 
-void callback (req_msg_t *msg, FPF latitude, FPF longitude, float score,
-		void *arg_void)
+void callback (msg_t *msg)
 {
-	cb_arg_t *arg = (cb_arg_t *)arg_void;
+	req_t *request = (req_t *)msg->content;
+	cb_arg_t *arg = (cb_arg_t *)msg->arg;
 
 	printf("latitude   longitude  score\n");
-	printf(FPF_T" "FPF_T" %.3f\n", latitude, longitude, score);
+	printf(FPF_T" "FPF_T" %.3f\n",
+			request->latitude, request->longitude, request->score);
 	fflush(stdout);
 
-	cvReleaseImage(&msg->img);
+	cvReleaseImage(&request->img);
 
 	pthread_cond_signal(&arg->cd_block);
 }
@@ -66,6 +68,7 @@ int main (int argc, char **argv)
 	db_t db;
 	search_t sc;
 
+	req_t request;
 	cb_arg_t cb_arg;
 	pthread_mutex_init(&cb_arg.mx_block, NULL);
 	pthread_cond_init(&cb_arg.cd_block, NULL);
@@ -95,7 +98,7 @@ int main (int argc, char **argv)
 	sc_init(&sc, &db);
 	pthread_create(&search_thread, NULL, &sc_main, (void*)(&sc));
 
-	pthread_create(&net_thread, NULL, &net_main, (void *)(&sc));
+//	pthread_create(&net_thread, NULL, &net_main, (void *)(&sc));
 
 	while (1) {
 		printf("> ");
@@ -125,7 +128,9 @@ int main (int argc, char **argv)
 			input_img = resized_img;
 		}
 
-		if (sc_request(&sc, input_img, &callback, (void *)&cb_arg)) {
+		request.img = input_img;
+		if (msg_write(&sc.msgbox,
+					(void *)&request, callback, (void *)&cb_arg)) {
 			printf("Request failed: %s\n", img_path);
 			cvReleaseImage(&input_img);
 		}

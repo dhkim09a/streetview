@@ -1,9 +1,12 @@
 #ifndef __SEARCH_H_
 #define __SEARCH_H_
 
+#include <pthread.h>
+
 #include "surflib.h"
 #include "db.h"
 #include "db_loader.h"
+#include "message.h"
 
 #ifndef MATCH_THRESH
 #error Define MATCH_THRESH!
@@ -32,32 +35,37 @@ struct _interim {
 	float dist_second __attribute__((aligned (4)));
 } __attribute__((packed));
 
-typedef struct _req_msg_t req_msg_t;
-typedef struct _req_msg_t {
+typedef struct _req_t {
 	IplImage *img;
-	void (*cb)(req_msg_t *msg, FPF latitude, FPF longitude, float score,
-			void *arg);
-	void *cb_arg;
-} req_msg_t;
+	FPF latitude;
+	FPF longitude;
+	FPF score;
+} req_t;
 
 typedef struct _search_t {
-	int expired;
 	db_t *db;
-
-	/* circular queue */
-	req_msg_t req_queue[BACKLOG];
-	int head;
-	int tail;
-	int empty;
-
-	pthread_mutex_t mx_queue;
-	pthread_cond_t cd_worker;
+	msgbox_t msgbox;
 } search_t;
 
+typedef struct _task_t {
+	ipoint_t *haystack;
+	int haystack_size;
+	IpVec needle;
+	struct _interim *result;
+} task_t;
+
+typedef struct _worker {
+	bool dead;
+
+	pthread_t tid;
+	msgbox_t msgbox;
+	bool isbusy;
+	size_t chunk_size;
+
+	db_t *db;
+	pthread_cond_t *cd_wait_worker;
+} worker_t;
+
 int sc_init(search_t *sc, db_t *db);
-int sc_request(search_t *sc, IplImage *img,
-		void (*cb)(req_msg_t *msg, FPF latitude, FPF longitude, float score,
-			void *arg),
-		void *cb_arg);
 void *sc_main(void *arg);
 #endif /* __SEARCH_H_ */

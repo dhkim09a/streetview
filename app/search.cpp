@@ -14,6 +14,7 @@
 #include "db.h"
 #include "search.h"
 #include "db_loader.h"
+#include "message.h"
 
 #ifdef PROFILE
 #define PROFILE_ON
@@ -22,8 +23,12 @@
 
 #define SURF_THRESHOLD 0.0001f
 
-#ifndef RUN_UNIT
-#error Define RUN_UNIT!
+#ifndef CPU_CHUNK_SIZE
+#error Define CPU_CHUNK_SIZE!
+#endif
+
+#ifndef GPU_CHUNK_SIZE
+#error Define GPU_CHUNK_SIZE!
 #endif
 
 #ifndef MEM_LIMIT
@@ -34,174 +39,228 @@
 #error Define NUMCPU as a positive value!
 #endif
 
-#ifndef search
-#error Define search()!
+#ifndef NUMGPU
+#error Define NUMGPU as a positive value!
 #endif
 
+#define NUM_WORKER (NUMCPU + NUMGPU)
 #define MAX_IPTS 2000
 
-extern int search (IpVec needle, ipoint_t *haystack, int haystack_size,
-		struct _interim *result, int result_size, int numcpu);
+extern void *search_cpu_main(void *arg);
+extern void *search_gpu_main(void *arg);
 
 int sc_init(search_t *sc, db_t *db)
 {
-	int i;
 	sc->db = db;
-	for (i = 0; i < BACKLOG; i++) {
-		sc->req_queue[i].img = NULL;
-		sc->req_queue[i].cb = NULL;
-		sc->req_queue[i].cb_arg = NULL;
-	}
-	sc->head = 0; 
-	sc->tail = 0;
-	sc->empty = 1;
-
-	pthread_mutex_init(&sc->mx_queue, NULL);
-	pthread_cond_init(&sc->cd_worker, NULL);
+	msg_init_box(&sc->msgbox);
 
 	return 0;
 }
 
-int sc_request(search_t *sc, IplImage *img,
-		void (*cb)(req_msg_t *msg, FPF latitude, FPF longitude, float score,
-			void *arg),
-		void *cb_arg)
+static int init_worker_pool(worker_t *workers,
+		db_t *db, pthread_cond_t *cd_wait_worker,
+		void *(*cpu_thread_main)(void *arg),
+		size_t cpu_chunk_size, int num_cpu_threads,
+		void *(*gpu_thread_main)(void *arg),
+		size_t gpu_chunk_size, int num_gpu_threads)
 {
-	pthread_mutex_lock(&sc->mx_queue);
-	req_msg_t *msg;
-	if (!sc->empty && sc->head == sc->tail) {
-		pthread_mutex_unlock(&sc->mx_queue);
-		return -1;
-	}
-	else {
-		msg = &sc->req_queue[sc->tail];
-		sc->tail = (sc->tail + 1) % BACKLOG;
-	}
-	msg->img = img;
-	msg->cb = cb;
-	msg->cb_arg = cb_arg;
+	int i;
 
-	sc->empty = 0;
-	pthread_cond_signal(&sc->cd_worker);
-	pthread_mutex_unlock(&sc->mx_queue);
+	for (i = 0; i < num_cpu_threads; i++) {
+		msg_init_box(&workers[i].msgbox);
+		workers[i].dead = false;
+		workers[i].isbusy = false;
+		workers[i].chunk_size = cpu_chunk_size;
+		workers[i].db = db;
+		workers[i].cd_wait_worker = cd_wait_worker;
+		pthread_create(&workers[i].tid, NULL, cpu_thread_main, &workers[i]);
+	}
+	for (i = num_cpu_threads; i < num_cpu_threads + num_gpu_threads; i++) {
+		msg_init_box(&workers[i].msgbox);
+		workers[i].dead = false;
+		workers[i].isbusy = false;
+		workers[i].chunk_size = gpu_chunk_size;
+		workers[i].db = db;
+		workers[i].cd_wait_worker = cd_wait_worker;
+		pthread_create(&workers[i].tid, NULL, gpu_thread_main, &workers[i]);
+	}
 
 	return 0;
 }
 
-inline void sc_destroy_req_msg(req_msg_t *msg)
+void merge_result(struct _interim *resultA, struct _interim *resultB, int size)
 {
-	msg->img = NULL;
-	msg->cb = NULL;
-	msg->cb_arg = NULL;
+	float dist;
+	int i;
+
+	for (i = 0; i < size; i++) {
+		if (resultA[i].dist_first == FLT_MAX) {
+			resultA[i].lat_first = resultB[i].lat_first;
+			resultA[i].lng_first = resultB[i].lng_first;
+			resultA[i].dist_first = resultB[i].dist_first;
+			resultA[i].dist_second = resultB[i].dist_second;
+			continue;
+		}
+
+		dist = resultB[i].dist_first;
+		if (dist < resultA[i].dist_first) {
+			resultA[i].lat_first = resultB[i].lat_first;
+			resultA[i].lng_first = resultB[i].lng_first;
+			resultA[i].dist_second = resultA[i].dist_first;
+			resultA[i].dist_first = dist;
+		}
+		else if (dist < resultA[i].dist_second)
+			resultA[i].dist_second = dist;
+
+		dist = resultB[i].dist_second;
+		if (dist < resultA[i].dist_first) {
+			resultA[i].lat_first = resultB[i].lat_first;
+			resultA[i].lng_first = resultB[i].lng_first;
+			resultA[i].dist_second = resultA[i].dist_first;
+			resultA[i].dist_first = dist;
+		}
+		else if (dist < resultA[i].dist_second)
+			resultA[i].dist_second = dist;
+	}
+
+	return;
 }
 
 void *sc_main(void *arg)
 {
-	req_msg_t *msg;
 	search_t *sc = (search_t *)arg;
 	db_t *db = sc->db;
+	msg_t msg;
+	req_t *request;
+	IpVec needle;
 
-	struct _interim *result;
 	result_t answer;
 	ResVec answer_vec;
-	IpVec ipts_vec;
-
-	ipoint_t *haystack = NULL;
 	int haystack_size; /* number of entries in haystack */
 	size_t haystack_mem_size;
-	int haystack_read;
 	size_t db_left;
 
-	int i, j, found;
+	worker_t workers[NUM_WORKER];
+	task_t tasks[NUM_WORKER];
+	int i, j, worker, found;
 	float dist_ratio;
 
-	result = (struct _interim *)malloc(
-			MAX_IPTS * sizeof(struct _interim));
+	pthread_mutex_t mx_wait_worker;
+	pthread_cond_t cd_wait_worker;
+
+	pthread_mutex_init(&mx_wait_worker, NULL);
+	pthread_cond_init(&cd_wait_worker, NULL);
+
+	for (i = 0; i < NUM_WORKER; i++)
+		tasks[i].result = (struct _interim *)malloc(
+				MAX_IPTS * sizeof(struct _interim));
+
+	init_worker_pool(workers, db, &cd_wait_worker,
+			search_cpu_main, CPU_CHUNK_SIZE, NUMCPU,
+			search_gpu_main, GPU_CHUNK_SIZE, NUMGPU);
 
 	while (1) {
-		pthread_mutex_lock(&sc->mx_queue);
-		if (sc->empty)
-			pthread_cond_wait(&sc->cd_worker, &sc->mx_queue);
-		msg = &sc->req_queue[sc->head];
-		if (!msg->img || !msg->cb_arg || !msg->cb) {
-			fprintf(stderr, "%s:%d: Something goes wrong\n",
-					__func__, __LINE__);
-			exit(0);
-		}
-		sc->head = (sc->head + 1) % BACKLOG;
-		if (sc->head == sc->tail)
-			sc->empty = 1;
-		pthread_mutex_unlock(&sc->mx_queue);
+		PROFILE_INIT();
+		PROFILE_VAR(search);
+
+		msg_read(&sc->msgbox, &msg);
 
 		PROFILE_START();
-		PROFILE_VAR(surf_input_image);
-		PROFILE_VAR(load_database);
-		PROFILE_VAR(vector_matching);
 
-		PROFILE_FROM(surf_input_image);
+		if (!msg.content)
+			continue;
 
-		surfDetDes(msg->img, ipts_vec, false, 3, 4, 3, SURF_THRESHOLD);
-#if 0
-		printf("Extracted %lu interesting points from input image\n",
-				ipts_vec.size());
-#endif
-		/* truncate ipts_vec */
-		while (ipts_vec.size() > MAX_IPTS)
-			ipts_vec.pop_back();
+		request = (req_t *)msg.content;
 
-		PROFILE_TO(surf_input_image);
+		if (!request->img)
+			continue;
 
-		/* init reault */
-		for (i = 0; i < (int)ipts_vec.size(); i++) {
-			result[i].dist_first = FLT_MAX;
-			result[i].dist_second = FLT_MAX;
-			result[i].lat_first = 0;
-			result[i].lng_first = 0;
-		}
+		surfDetDes(request->img, needle, false, 3, 4, 3, SURF_THRESHOLD);
 
-		/* Read DB and do searching */
-		db_left = db->db_len;
+		while (needle.size() > MAX_IPTS)
+			needle.pop_back();
 
-		while (1) {
-			haystack_size = MIN(RUN_UNIT, db_left) / sizeof(ipoint_t);
-			haystack_mem_size = haystack_size * sizeof(ipoint_t);
-
-			if (haystack_size <= 0)
-				break;
-
-			if (haystack == NULL)
-				haystack = (ipoint_t *)malloc(haystack_mem_size);
-
-			PROFILE_FROM(load_database);
-			pthread_mutex_lock(&db->mx_db);
-			while (db_readable(db) < haystack_mem_size) {
-				pthread_cond_wait(&db->cd_reader, &db->mx_db);
+		for (i = 0; i < NUM_WORKER; i++)
+			for (j = 0; j < (int)needle.size(); j++) {
+				struct _interim *result = &(tasks[i].result[j]);
+				result->dist_first = FLT_MAX;
+				result->dist_second = FLT_MAX;
+				result->lat_first = 0;
+				result->lng_first = 0;
 			}
 
-			haystack_read = db_acquire(db, 
-					(void **)&haystack, haystack_mem_size);
-			db_left -= haystack_read;
-			pthread_cond_signal(&db->cd_writer);
+		PROFILE_FROM(search);
+		/* Read DB and do searching */
+		db_left = db->db_len;
+		while (1) {
+
+			/* Choose an idle worker */
+			for (worker = 0; worker < NUM_WORKER; worker++)
+				if (workers[worker].isbusy == false)
+					break;
+			if (worker == NUM_WORKER) {
+				/* No worker is available. Wait */
+				pthread_mutex_lock(&mx_wait_worker);
+				pthread_cond_wait(&cd_wait_worker, &mx_wait_worker);
+				pthread_mutex_unlock(&mx_wait_worker);
+				continue;
+			}
+
+			/* Calculate how much DB should process */
+			haystack_size = MIN(workers[worker].chunk_size, db_left)
+				/ sizeof(ipoint_t);
+			haystack_mem_size = haystack_size * sizeof(ipoint_t);
+
+			if (haystack_size <= 0) {
+				/* Nothing left. Finish searching */
+				for (i = 0; i < NUM_WORKER; i++)
+					if (workers[i].isbusy == true) break;
+				if (i == NUM_WORKER)
+					break;
+				else {
+					/* Wait until any worker finishes */
+					pthread_mutex_lock(&mx_wait_worker);
+					pthread_cond_wait(&cd_wait_worker, &mx_wait_worker);
+					pthread_mutex_unlock(&mx_wait_worker);
+					continue;
+				}
+			}
+
+			pthread_mutex_lock(&db->mx_db);
+			/*
+			while (db_readable(db) < haystack_mem_size)
+				pthread_cond_wait(&db->cd_reader, &db->mx_db);
+				*/
+
+			haystack_mem_size = db_acquire(db,
+					(void **)&(tasks[worker].haystack), haystack_mem_size);
+			tasks[worker].haystack_size = haystack_mem_size / sizeof(ipoint_t);
+			tasks[worker].needle = needle;
+
+			workers[worker].isbusy = true;
+			msg_write(&(workers[worker].msgbox), &tasks[worker], NULL, NULL);
+
+			db_left -= haystack_mem_size;
+
 			pthread_mutex_unlock(&db->mx_db);
-			PROFILE_TO(load_database);
-
-			PROFILE_FROM(vector_matching);
-			search(ipts_vec, haystack, haystack_read / sizeof(ipoint_t),
-					result, ipts_vec.size(), NUMCPU);
-			PROFILE_TO(vector_matching);
-			db_release(db, haystack, haystack_read);
 		}
-#if 0
-		printf("\n");
-#endif
+		PROFILE_TO(search);
 
-		for (i = 0; i < (int)ipts_vec.size(); i++) {
-			dist_ratio = result[i].dist_first / result[i].dist_second;
+		/* merge results from workers */
+		for (i = 1; i < NUM_WORKER; i++)
+			merge_result(tasks[0].result,
+					tasks[i].result, needle.size());
+
+		struct _interim *merged_result = tasks[0].result;
+
+		for (i = 0; i < (int)needle.size(); i++) {
+			dist_ratio = merged_result[i].dist_first
+				/ merged_result[i].dist_second;
 			if (dist_ratio < MATCH_THRESH_SQUARE){
 				found = -1;
 				for (j = 0; j < (int)answer_vec.size(); j++) {
-					if (answer_vec[j].latitude == result[i].lat_first
-							&& answer_vec[j].longitude == result[i].lng_first) {
+					if (answer_vec[j].latitude == merged_result[i].lat_first
+							&& answer_vec[j].longitude == merged_result[i].lng_first) {
 						answer_vec[j].score += 1 - dist_ratio;
 						found = 1;
 						break;
@@ -209,8 +268,8 @@ void *sc_main(void *arg)
 				}
 
 				if (found < 0) {
-					answer.latitude = result[i].lat_first;
-					answer.longitude = result[i].lng_first;
+					answer.latitude = merged_result[i].lat_first;
+					answer.longitude = merged_result[i].lng_first;
 					answer.score = 1 - dist_ratio;
 
 					answer_vec.push_back(answer);
@@ -225,17 +284,20 @@ void *sc_main(void *arg)
 			answer_vec[i].score *= 100 / sum;
 		std::sort(answer_vec.begin(), answer_vec.end(), comp_result);
 
+		request->latitude = answer_vec[0].latitude;
+		request->longitude = answer_vec[0].longitude;
+		request->score = answer_vec[0].score;
+
 		PROFILE_END();
 		PROFILE_PRINT(stdout);
-
-		msg->cb(msg, answer_vec[0].latitude, answer_vec[0].longitude,
-				answer_vec[0].score, msg->cb_arg);
+		if (msg.cb != NULL)
+			msg.cb(&msg);
 
 		/* XXX: Is this sufficient to free all the memory? */
-		sc_destroy_req_msg(msg);
-		ipts_vec.clear();
+		needle.clear();
 		answer_vec.clear();
 	}
 
 	return NULL;
 }
+

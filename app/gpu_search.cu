@@ -163,12 +163,13 @@ __global__ void doSearchKernel (int shared_mem_size, int needle_idx,
 	return;
 }
 
-int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
-		struct _interim *result, int result_size, int dummy)
+static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
+		struct _interim *result, int result_size)
 {
 	cudaSetDevice(DEV_ID);
 	cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
 
+	PROFILE_INIT();
 	PROFILE_START();
 	PROFILE_VAR(init_device);
 	PROFILE_VAR(copy_needle);
@@ -183,7 +184,7 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	ipoint_essence_t *needle_essence_h, *needle_essence_d;
 	ipoint_t *haystack_d;
 	struct _interim *interim_h, *interim_d;
-	int needle_size = needle.size();
+	int needle_size = (*needle).size();
 	cudaError_t err;
 
 	PROFILE_FROM(init_device);
@@ -211,7 +212,7 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 			needle_size * sizeof(ipoint_essence_t));
 	for (i = 0; i < needle_size; i++)
 		for (j = 0; j < VEC_DIM; j++)
-			needle_essence_h[i].vec[j] = needle[i].descriptor[j];
+			needle_essence_h[i].vec[j] = (*needle)[i].descriptor[j];
 
 	PROFILE_FROM(copy_needle);
 	/* Copy needle to device */
@@ -320,7 +321,7 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	PROFILE_TO(copy_result);
 
 	PROFILE_FROM(post_processing);
-	iter = MIN((int)needle.size(), result_size);
+	iter = MIN((int)(*needle).size(), result_size);
 	for (i = 0; i < iter; i++) {
 		for (j = 0; j < (int)(grid_dim * stream_dim); j++) {
 			if (result[i].dist_first == FLT_MAX) {
@@ -373,4 +374,28 @@ int searchGPU (IpVec needle, ipoint_t *haystack, int haystack_size,
 	PROFILE_PRINT(stdout);
 	
 	return 0;
+}
+
+void *search_gpu_main(void *arg)
+{
+	worker_t *me = (worker_t *)arg;
+	msg_t msg;
+
+	while (1) {
+		if (me->dead)
+			break;
+
+		msg_read(&me->msgbox, &msg);
+		task_t *task = (task_t *)msg.content;
+
+		doSearch(&task->needle, task->haystack, task->haystack_size,
+				task->result, (task->needle).size());
+
+		me->isbusy = false;
+		db_release(me->db,
+				task->haystack, task->haystack_size * sizeof(ipoint_t));
+		pthread_cond_signal(me->cd_wait_worker);
+	}
+
+	return NULL;
 }

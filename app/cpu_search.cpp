@@ -28,17 +28,12 @@ typedef struct _arg_t {
 	pthread_cond_t *wakeup_master;
 } arg_t;
 
-int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
+static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 		struct _interim *interim, int interim_size)
 {
 	float dist;
 	int i, j, k, l;
 	int iter;
-
-	for (i = 0; i < interim_size; i++) {
-		interim[i].dist_first = FLT_MAX;
-		interim[i].dist_second = FLT_MAX;
-	}
 
 	iter = MIN(interim_size, (int)(*needle).size());
 	int batch = MIN(100, iter);
@@ -121,105 +116,26 @@ int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 	return 0;
 }
 
-void *thread_main(void *arg)
+void *search_cpu_main(void *arg)
 {
-	arg_t *arg1 = (arg_t *)arg;
+	worker_t *me = (worker_t *)arg;
+	msg_t msg;
 
-	doSearch(arg1->needle, arg1->haystack, arg1->haystack_size,
-			arg1->interim, arg1->interim_size);
+	while (1) {
+		if (me->dead)
+			break;
 
-	pthread_mutex_lock(arg1->mx_running);
-	if (--(*arg1->running) == 0)
-		pthread_cond_signal(arg1->wakeup_master);
-	pthread_mutex_unlock(arg1->mx_running);
+		msg_read(&me->msgbox, &msg);
+		task_t *task = (task_t *)msg.content;
+
+		doSearch(&task->needle, task->haystack, task->haystack_size,
+				task->result, (task->needle).size());
+
+		me->isbusy = false;
+		db_release(me->db,
+				task->haystack, task->haystack_size * sizeof(ipoint_t));
+		pthread_cond_signal(me->cd_wait_worker);
+	}
 
 	return NULL;
-}
-
-int searchCPU (IpVec needle, ipoint_t *haystack, int haystack_size,
-		struct _interim *result, int result_size, int numcpu)
-{
-	if (numcpu <= 0)
-		return -1;
-
-	pthread_t *threads = (pthread_t *)malloc(numcpu * sizeof(pthread_t));
-	arg_t *args = (arg_t *)malloc(numcpu * sizeof(arg_t));
-	int i, j, err, iter;
-	int status;
-	float dist;
-
-	int running = numcpu;
-	pthread_mutex_t mx_running;
-	pthread_cond_t wakeup_master;
-
-	pthread_mutex_init(&mx_running, NULL);
-	pthread_cond_init(&wakeup_master, NULL);
-
-	/* FIXME: Threads should divide needle, NOT haystack */
-	pthread_mutex_lock(&mx_running);
-	for (i = 0; i < numcpu; i++) {
-		args[i].needle = &needle;
-		args[i].haystack = &haystack[ haystack_size / numcpu * i ];
-		args[i].haystack_size = MIN( haystack_size / numcpu,
-				haystack_size - (haystack_size / numcpu * i) );
-		args[i].interim = (struct _interim *)malloc(
-				needle.size() * sizeof(struct _interim));
-		args[i].interim_size = needle.size();
-		args[i].running = &running;
-		args[i].mx_running = &mx_running;
-		args[i].wakeup_master = &wakeup_master;
-
-		pthread_create(&(threads[i]), NULL, &thread_main, (void *)(&args[i]));
-	}
-
-	pthread_cond_wait(&wakeup_master, &mx_running);
-	pthread_mutex_unlock(&mx_running);
-
-	for (i = 0; i < numcpu; i++) {
-		if ((err = pthread_join(threads[i], (void **)&status))) {
-			fprintf(stderr, "pthread_join(%d) failed (returned %d)\n",
-					i, err);
-			fflush(stderr);
-		}
-	}
-
-	iter = MIN((int)needle.size(), result_size);
-	for (i = 0; i < iter; i++) {
-		for (j = 0; j < numcpu; j++) {
-			if (result[i].dist_first == FLT_MAX) {
-				result[i].lat_first = args[j].interim[i].lat_first;
-				result[i].lng_first = args[j].interim[i].lng_first;
-				result[i].dist_first = args[j].interim[i].dist_first;
-				result[i].dist_second = args[j].interim[i].dist_second;
-				continue;
-			}
-
-			dist = args[j].interim[i].dist_first;
-			if (dist < result[i].dist_first) {
-				result[i].lat_first = args[j].interim[i].lat_first;
-				result[i].lng_first = args[j].interim[i].lng_first;
-				result[i].dist_second = result[i].dist_first;
-				result[i].dist_first = dist;
-			}
-			else if (dist < result[i].dist_second)
-				result[i].dist_second = dist;
-
-			dist = args[j].interim[i].dist_second;
-			if (dist < result[i].dist_first) {
-				result[i].lat_first = args[j].interim[i].lat_first;
-				result[i].lng_first = args[j].interim[i].lng_first;
-				result[i].dist_second = result[i].dist_first;
-				result[i].dist_first = dist;
-			}
-			else if (dist < result[i].dist_second)
-				result[i].dist_second = dist;
-		}
-	}
-
-	for (i = 0; i < numcpu; i++)
-		free(args[i].interim);
-	free(args);
-	free(threads);
-
-	return 0;
 }
