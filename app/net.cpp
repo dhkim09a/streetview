@@ -196,20 +196,20 @@ IplImage *LogAndReadImage(void *buffer, int len, char *name, int name_len)
 }
 
 static void
-callback (req_msg_t *msg, FPF latitude, FPF longitude, float score,
-		void *arg_void)
+callback (msg_t *msg)
 {
-	cb_arg_t *arg = (cb_arg_t *)arg_void;
+	req_t *request = (req_t *)msg->content;
+	cb_arg_t *arg = (cb_arg_t *)msg->arg;
 
-	arg->latitude = latitude;
-	arg->longitude = longitude;
-	arg->score = score;
+	arg->latitude = request->latitude;
+	arg->longitude = request->longitude;
+	arg->score = request->score;
 #if 0
 	printf("latitude   longitude  score\n");
 	printf(FPF_T" "FPF_T" %.3f\n", latitude, longitude, score);
 	fflush(stdout);
 #endif
-	cvReleaseImage(&msg->img);
+	cvReleaseImage(&(request->img));
 
 	FD_SET(arg->sock, arg->wfds);
 	while(write(arg->pipe_wkup, "dummy", 1) < 0);
@@ -230,6 +230,7 @@ void *net_main (void *arg)
 
 	int len;
 
+	req_t request[BACKLOG];
 	char *img_buf[BACKLOG] = {NULL};
 	int img_buf_tag[BACKLOG] = {0};
 	int img_buf_len[BACKLOG] = {0};
@@ -394,9 +395,11 @@ void *net_main (void *arg)
 					cb_arg[i].wfds = &wfds;
 					cb_arg[i].pipe_wkup = pipe_select[1];
 
-					if (sc_request(sc, img, &callback, (void*)&cb_arg[i])) {
-						cvReleaseImage(&img);
+					request[idx].img = img;
+					if (msg_write(&sc->msgbox, (void *)&request,
+								callback, (void *)&cb_arg[i])) {
 						CLOSE(i);
+						cvReleaseImage(&img);
 					}
 				}
 

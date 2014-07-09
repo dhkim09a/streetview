@@ -98,7 +98,7 @@ int main (int argc, char **argv)
 	sc_init(&sc, &db);
 	pthread_create(&search_thread, NULL, &sc_main, (void*)(&sc));
 
-//	pthread_create(&net_thread, NULL, &net_main, (void *)(&sc));
+	pthread_create(&net_thread, NULL, &net_main, (void *)(&sc));
 
 	while (1) {
 		printf("> ");

@@ -19,9 +19,8 @@ CFLAGS += $(addprefix -D,$(CONFIG))
 
 PROG = curator.elf
 
-OBJS = db_loader.o main.o message.o \
+OBJS = db_loader.o main.o message.o net.o \
 			 search.o cpu_search.o gpu_search.o \
-			 #net.o
 
 all: $(PROG)
 
