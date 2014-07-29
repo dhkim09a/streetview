@@ -234,6 +234,10 @@ void *sc_main(void *arg)
 
 			haystack_mem_size = db_acquire(db,
 					(void **)&(tasks[worker].haystack), haystack_mem_size);
+			if (haystack_mem_size <= 0) {
+				pthread_mutex_unlock(&db->mx_db);
+				continue;
+			}
 			tasks[worker].haystack_size = haystack_mem_size / sizeof(ipoint_t);
 			tasks[worker].needle = needle;
 
@@ -284,9 +288,11 @@ void *sc_main(void *arg)
 			answer_vec[i].score *= 100 / sum;
 		std::sort(answer_vec.begin(), answer_vec.end(), comp_result);
 
-		request->latitude = answer_vec[0].latitude;
-		request->longitude = answer_vec[0].longitude;
-		request->score = answer_vec[0].score;
+		if (answer_vec.size() > 0) {
+			request->latitude = answer_vec[0].latitude;
+			request->longitude = answer_vec[0].longitude;
+			request->score = answer_vec[0].score;
+		}
 
 		PROFILE_END();
 		PROFILE_PRINT(stdout);
