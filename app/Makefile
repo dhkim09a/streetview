@@ -25,7 +25,7 @@ OBJS = db_loader.o main.o message.o net.o \
 all: $(PROG)
 
 $(PROG): $(OBJS)
-	$(CC) -g -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
+	$(CC) -g -lcuda -o $@ $^ $(addprefix -Xlinker ,$(LDFLAGS))
 
 %.o: %.cu 
 	$(CC) $(CUFLAGS) $(addprefix -Xcompiler ,$(CFLAGS)) -c $<

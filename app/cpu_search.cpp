@@ -116,6 +116,26 @@ static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 	return 0;
 }
 
+int init_cpu_worker_pool(worker_t *workers,
+		db_t *db, pthread_cond_t *cd_wait_worker,
+		void *(*thread_main)(void *arg),
+		size_t chunk_size, int num_threads)
+{
+	int i;
+
+	for (i = 0; i < num_threads; i++) {
+		msg_init_box(&workers[i].msgbox);
+		workers[i].dead = false;
+		workers[i].isbusy = false;
+		workers[i].chunk_size = chunk_size;
+		workers[i].db = db;
+		workers[i].cd_wait_worker = cd_wait_worker;
+		pthread_create(&workers[i].tid, NULL, thread_main, &workers[i]);
+	}
+
+	return 0;
+}
+
 void *search_cpu_main(void *arg)
 {
 	worker_t *me = (worker_t *)arg;

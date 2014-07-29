@@ -14,6 +14,8 @@
 
 #define MATCH_THRESH_SQUARE (MATCH_THRESH * MATCH_THRESH)
 
+#define MAX_IPTS 2000
+
 typedef struct _result_t {
 	FPF latitude;
 	FPF longitude;
@@ -62,9 +64,21 @@ typedef struct _worker {
 	bool isbusy;
 	size_t chunk_size;
 
+	void *ptr;
+
 	db_t *db;
 	pthread_cond_t *cd_wait_worker;
 } worker_t;
+
+int init_cpu_worker_pool(worker_t *workers,
+		db_t *db, pthread_cond_t *cd_wait_worker,
+		void *(*thread_main)(void *arg),
+		size_t chunk_size, int num_threads);
+
+int init_gpu_worker_pool(worker_t *workers,
+		db_t *db, pthread_cond_t *cd_wait_worker,
+		void *(*thread_main)(void *arg),
+		size_t chunk_size, int num_threads);
 
 int sc_init(search_t *sc, db_t *db);
 void *sc_main(void *arg);

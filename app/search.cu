@@ -44,8 +44,24 @@
 #endif
 
 #define NUM_WORKER (NUMCPU + NUMGPU)
-#define MAX_IPTS 2000
 
+#if 0
+#define pthread_cond_wait(args...) \
+	printf("%lu:WAIT(%s): %s %d\n", pthread_self(), #args, __func__, __LINE__); \
+pthread_cond_wait(args)
+
+#define pthread_cond_signal(args...) \
+	printf("%lu:SIGNAL(%s): %s %d\n", pthread_self(), #args, __func__, __LINE__); \
+pthread_cond_signal(args)
+
+#define pthread_mutex_unlock(args...) \
+	printf("%lu:UNLOCK(%s): %s %d\n", pthread_self(), #args, __func__, __LINE__); \
+pthread_mutex_unlock(args)
+
+#define pthread_mutex_lock(args...) \
+	printf("%lu:LOCK(%s): %s %d\n", pthread_self(), #args, __func__, __LINE__); \
+pthread_mutex_lock(args)
+#endif
 extern void *search_cpu_main(void *arg);
 extern void *search_gpu_main(void *arg);
 
@@ -53,37 +69,6 @@ int sc_init(search_t *sc, db_t *db)
 {
 	sc->db = db;
 	msg_init_box(&sc->msgbox);
-
-	return 0;
-}
-
-static int init_worker_pool(worker_t *workers,
-		db_t *db, pthread_cond_t *cd_wait_worker,
-		void *(*cpu_thread_main)(void *arg),
-		size_t cpu_chunk_size, int num_cpu_threads,
-		void *(*gpu_thread_main)(void *arg),
-		size_t gpu_chunk_size, int num_gpu_threads)
-{
-	int i;
-
-	for (i = 0; i < num_cpu_threads; i++) {
-		msg_init_box(&workers[i].msgbox);
-		workers[i].dead = false;
-		workers[i].isbusy = false;
-		workers[i].chunk_size = cpu_chunk_size;
-		workers[i].db = db;
-		workers[i].cd_wait_worker = cd_wait_worker;
-		pthread_create(&workers[i].tid, NULL, cpu_thread_main, &workers[i]);
-	}
-	for (i = num_cpu_threads; i < num_cpu_threads + num_gpu_threads; i++) {
-		msg_init_box(&workers[i].msgbox);
-		workers[i].dead = false;
-		workers[i].isbusy = false;
-		workers[i].chunk_size = gpu_chunk_size;
-		workers[i].db = db;
-		workers[i].cd_wait_worker = cd_wait_worker;
-		pthread_create(&workers[i].tid, NULL, gpu_thread_main, &workers[i]);
-	}
 
 	return 0;
 }
@@ -155,8 +140,9 @@ void *sc_main(void *arg)
 		tasks[i].result = (struct _interim *)malloc(
 				MAX_IPTS * sizeof(struct _interim));
 
-	init_worker_pool(workers, db, &cd_wait_worker,
-			search_cpu_main, CPU_CHUNK_SIZE, NUMCPU,
+	init_cpu_worker_pool(workers, db, &cd_wait_worker,
+			search_cpu_main, CPU_CHUNK_SIZE, NUMCPU);
+	init_gpu_worker_pool(&workers[NUMCPU], db, &cd_wait_worker,
 			search_gpu_main, GPU_CHUNK_SIZE, NUMGPU);
 
 	while (1) {
@@ -234,6 +220,10 @@ void *sc_main(void *arg)
 
 			haystack_mem_size = db_acquire(db,
 					(void **)&(tasks[worker].haystack), haystack_mem_size);
+			if (haystack_mem_size <= 0) {
+				pthread_mutex_unlock(&db->mx_db);
+				continue;
+			}
 			tasks[worker].haystack_size = haystack_mem_size / sizeof(ipoint_t);
 			tasks[worker].needle = needle;
 
@@ -284,9 +274,11 @@ void *sc_main(void *arg)
 			answer_vec[i].score *= 100 / sum;
 		std::sort(answer_vec.begin(), answer_vec.end(), comp_result);
 
-		request->latitude = answer_vec[0].latitude;
-		request->longitude = answer_vec[0].longitude;
-		request->score = answer_vec[0].score;
+		if (answer_vec.size() > 0) {
+			request->latitude = answer_vec[0].latitude;
+			request->longitude = answer_vec[0].longitude;
+			request->score = answer_vec[0].score;
+		}
 
 		PROFILE_END();
 		PROFILE_PRINT(stdout);

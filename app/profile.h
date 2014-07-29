@@ -84,7 +84,7 @@ do { int i; \
 					100 * (double)*__var_list[i] / (double)__c_total_us); \
 			printf("\r%s\n", __name_list[i]); \
 		} \
-	fprintf(fp, "etc. (includes the overhead)  : %11.3lf ms (%5.2lf %%)\n", \
+	fprintf(fp, "etc. (+ overhead)             : %11.3lf ms (%5.2lf %%)\n", \
 			(double)__c_etc_us / 1000.0, \
 			100 * (double)__c_etc_us / (double)__c_total_us); \
 	fprintf(fp, "total                         : %11.3lf ms\n", \

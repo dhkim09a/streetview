@@ -51,8 +51,9 @@ void callback (msg_t *msg)
 
 int main (int argc, char **argv)
 {
-	if (argc != 2) {
+	if (argc != 2 && argc != 3) {
 		printf("usage: %s [database file]\n", argv[0]);
+		printf("usage: %s [database file] [input image file]\n", argv[0]);
 		exit(0);
 	}
 
@@ -101,13 +102,18 @@ int main (int argc, char **argv)
 	pthread_create(&net_thread, NULL, &net_main, (void *)(&sc));
 
 	while (1) {
-		printf("> ");
-		fflush(stdout);
+		if (argc == 3) {
+			strncpy(img_path, argv[2], MAX_IMG_PATH_LEN);
+		}
+		else {
+			printf("> ");
+			fflush(stdout);
 
-		if (!gets(img_path))
-			continue;
-		if (img_path[0] == '\0')
-			continue;
+			if (!gets(img_path))
+				continue;
+			if (img_path[0] == '\0')
+				continue;
+		}
 
 		/* load input image */
 		if (!(input_img = cvLoadImage(img_path))) {
@@ -138,6 +144,9 @@ int main (int argc, char **argv)
 		pthread_mutex_lock(&cb_arg.mx_block);
 		pthread_cond_wait(&cb_arg.cd_block, &cb_arg.mx_block);
 		pthread_mutex_unlock(&cb_arg.mx_block);
+
+		if (argc == 3)
+			break;
 	}
 
 	db_kill(&db);

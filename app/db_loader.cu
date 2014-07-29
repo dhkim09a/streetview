@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <assert.h>
+#include <cuda.h>
+#include <cuda_runtime_api.h>
 
 #include "db_loader.h"
 
@@ -23,19 +25,19 @@
 
 #if 0
 #define pthread_cond_wait(args...) \
-	printf("WAIT(%s): %s %d\n", #args, __func__, __LINE__); \
+	printf("%lu:WAIT(%s): %s %d\n", pthread_self(), #args, __func__, __LINE__); \
 pthread_cond_wait(args)
 
 #define pthread_cond_signal(args...) \
-	printf("SIGNAL(%s): %s %d\n", #args, __func__, __LINE__); \
+	printf("%lu:SIGNAL(%s): %s %d\n", pthread_self(), #args, __func__, __LINE__); \
 pthread_cond_signal(args)
 
 #define pthread_mutex_unlock(args...) \
-	printf("UNLOCK(%s): %s %d\n", #args, __func__, __LINE__); \
+	printf("%lu:UNLOCK(%s): %s %d\n", pthread_self(), #args, __func__, __LINE__); \
 pthread_mutex_unlock(args)
 
 #define pthread_mutex_lock(args...) \
-	printf("LOCK(%s): %s %d\n", #args, __func__, __LINE__); \
+	printf("%lu:LOCK(%s): %s %d\n", pthread_self(), #args, __func__, __LINE__); \
 pthread_mutex_lock(args)
 #endif
 
@@ -184,11 +186,37 @@ int db_init(db_t *db, int fd, size_t db_len, int align)
 	db->middle = 0;
 	db->tail = 0;
 	db->buffer_len = (MEM_LIMIT / align) * align;
+#if 0
+	cuInit(0);
 	if (!(db->buffer = (uint8_t *)malloc(db->buffer_len))) {
 		fprintf(stderr, "%s:%d: Failed to allocate buffer\n",
 				__func__, __LINE__);
 		exit(0);
 	}
+#if 0
+	if (cudaHostRegister(db->buffer, db->buffer_len, cudaHostRegisterPortable)
+			!= cudaSuccess) {
+		printf("WRONG!\n");
+		fflush(stdout);
+		exit(0);
+	}
+	int *a;
+	cudaMallocHost(&a, sizeof(int));
+	*a = 25;
+	printf("%d@%p@%p\n", *a, a, &a);
+#endif
+#else
+	cudaDeviceSynchronize();
+	if (cudaMallocHost(&(db->buffer), db->buffer_len, cudaHostAllocDefault)
+			!= cudaSuccess) {
+		printf("WRONG!\n");
+		fflush(stdout);
+		exit(0);
+	}
+	else
+		printf("%p\n", db->buffer);
+
+#endif
 	if (!(db->bitmap = (uint8_t *)malloc((db->buffer_len / align / 8) + 1))) {
 		fprintf(stderr, "%s:%d: Failed to allocate bitmap\n",
 				__func__, __LINE__);
@@ -403,7 +431,7 @@ void *db_loader_main(void *arg_void)
 		pthread_mutex_unlock(&db->mx_db);
 	}
 
-	db_destroy(db);
+//	db_destroy(db);
 
 	return NULL;
 }
