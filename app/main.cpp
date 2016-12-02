@@ -9,6 +9,7 @@
 #include <vector>
 #include <math.h>
 #include <cv.h>
+#include <unistd.h>
 #include "surflib.h"
 
 #include "db.h"

@@ -5,10 +5,10 @@ CONFIG_MK = config.mk
 
 include $(CONFIG_MK)
 
-CCBIN = gcc
+CCBIN = g++-4.9
 CC = nvcc -ccbin $(CCBIN)
 
-CUFLAGS = -O0 --use_fast_math -lineinfo --maxrregcount=$(REG)
+CUFLAGS = -O0 --use_fast_math -lineinfo --maxrregcount=$(REG) -D_FORCE_INLINES
 CFLAGS = -O2 -Wall -I../openSURF/src -I../dbmaker -g \
 		 $(shell pkg-config --cflags opencv)
 CFLAGS += -Wno-unused-function
