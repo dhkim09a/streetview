@@ -17,6 +17,12 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 */
 
+#ifdef AVX
+#if (VEC_DIM % 64 != 0)
+#error VEC_DIM must be a multiple of 64 when AVX is enabled
+#endif
+#endif
+
 #if 0
 typedef struct _arg_t {
 	IpVec *needle;
@@ -35,7 +41,7 @@ static int doSearch (ipoint_t *needle, int needle_size, ipoint_t *haystack, int 
 		struct _interim *interim, int interim_size)
 {
 	float dist;
-	int i, j, k, l;
+	int i, j, k, l, m;
 	int iter;
 
 	iter = MIN(interim_size, needle_size);
@@ -45,56 +51,58 @@ static int doSearch (ipoint_t *needle, int needle_size, ipoint_t *haystack, int 
 			for (i = l * batch; (i < iter) && (i < (l + 1) * batch); i++) {
 #ifdef AVX
 				float res[8] = {0};
-
-				__m256 a_v0 = _mm256_loadu_ps(&((*needle)[i].descriptor[0])),
-					   a_v1 = _mm256_loadu_ps(&((*needle)[i].descriptor[8])),
-					   a_v2 = _mm256_loadu_ps(&((*needle)[i].descriptor[16])),
-					   a_v3 = _mm256_loadu_ps(&((*needle)[i].descriptor[24])),
-					   a_v4 = _mm256_loadu_ps(&((*needle)[i].descriptor[32])),
-					   a_v5 = _mm256_loadu_ps(&((*needle)[i].descriptor[40])),
-					   a_v6 = _mm256_loadu_ps(&((*needle)[i].descriptor[48])),
-					   a_v7 = _mm256_loadu_ps(&((*needle)[i].descriptor[56]));
-
-				__m256 b_v0 = _mm256_loadu_ps(&(haystack[j].vec[0])),
-					   b_v1 = _mm256_loadu_ps(&(haystack[j].vec[8])),
-					   b_v2 = _mm256_loadu_ps(&(haystack[j].vec[16])),
-					   b_v3 = _mm256_loadu_ps(&(haystack[j].vec[24])),
-					   b_v4 = _mm256_loadu_ps(&(haystack[j].vec[32])),
-					   b_v5 = _mm256_loadu_ps(&(haystack[j].vec[40])),
-					   b_v6 = _mm256_loadu_ps(&(haystack[j].vec[48])),
-					   b_v7 = _mm256_loadu_ps(&(haystack[j].vec[56]));
-
-				a_v0 = _mm256_sub_ps(a_v0, b_v0);
-				a_v1 = _mm256_sub_ps(a_v1, b_v1);
-				a_v2 = _mm256_sub_ps(a_v2, b_v2);
-				a_v3 = _mm256_sub_ps(a_v3, b_v3);
-				a_v4 = _mm256_sub_ps(a_v4, b_v4);
-				a_v5 = _mm256_sub_ps(a_v5, b_v5);
-				a_v6 = _mm256_sub_ps(a_v6, b_v6);
-				a_v7 = _mm256_sub_ps(a_v7, b_v7);
-
-				a_v0 = _mm256_mul_ps(a_v0, a_v0);
-				a_v1 = _mm256_mul_ps(a_v1, a_v1);
-				a_v2 = _mm256_mul_ps(a_v2, a_v2);
-				a_v3 = _mm256_mul_ps(a_v3, a_v3);
-				a_v4 = _mm256_mul_ps(a_v4, a_v4);
-				a_v5 = _mm256_mul_ps(a_v5, a_v5);
-				a_v6 = _mm256_mul_ps(a_v6, a_v6);
-				a_v7 = _mm256_mul_ps(a_v7, a_v7);
-
-				a_v0 = _mm256_add_ps(a_v0, a_v1);
-				a_v0 = _mm256_add_ps(a_v0, a_v2);
-				a_v0 = _mm256_add_ps(a_v0, a_v3);
-				a_v0 = _mm256_add_ps(a_v0, a_v4);
-				a_v0 = _mm256_add_ps(a_v0, a_v5);
-				a_v0 = _mm256_add_ps(a_v0, a_v6);
-				a_v0 = _mm256_add_ps(a_v0, a_v7);
-
-				_mm256_storeu_ps(res, a_v0);
-				
 				dist = 0;
-				for (k = 0; k < 8; k++)
-					dist += res[k];
+
+				for (m = 0; m < VEC_DIM; m += 64) {
+					__m256 a_v0 = _mm256_loadu_ps(&(needle[i].vec[m])),
+						   a_v1 = _mm256_loadu_ps(&(needle[i].vec[m + 8])),
+						   a_v2 = _mm256_loadu_ps(&(needle[i].vec[m + 16])),
+						   a_v3 = _mm256_loadu_ps(&(needle[i].vec[m + 24])),
+						   a_v4 = _mm256_loadu_ps(&(needle[i].vec[m + 32])),
+						   a_v5 = _mm256_loadu_ps(&(needle[i].vec[m + 40])),
+						   a_v6 = _mm256_loadu_ps(&(needle[i].vec[m + 48])),
+						   a_v7 = _mm256_loadu_ps(&(needle[i].vec[m + 56]));
+
+					__m256 b_v0 = _mm256_loadu_ps(&(haystack[j].vec[m])),
+						   b_v1 = _mm256_loadu_ps(&(haystack[j].vec[m + 8])),
+						   b_v2 = _mm256_loadu_ps(&(haystack[j].vec[m + 16])),
+						   b_v3 = _mm256_loadu_ps(&(haystack[j].vec[m + 24])),
+						   b_v4 = _mm256_loadu_ps(&(haystack[j].vec[m + 32])),
+						   b_v5 = _mm256_loadu_ps(&(haystack[j].vec[m + 40])),
+						   b_v6 = _mm256_loadu_ps(&(haystack[j].vec[m + 48])),
+						   b_v7 = _mm256_loadu_ps(&(haystack[j].vec[m + 56]));
+
+					a_v0 = _mm256_sub_ps(a_v0, b_v0);
+					a_v1 = _mm256_sub_ps(a_v1, b_v1);
+					a_v2 = _mm256_sub_ps(a_v2, b_v2);
+					a_v3 = _mm256_sub_ps(a_v3, b_v3);
+					a_v4 = _mm256_sub_ps(a_v4, b_v4);
+					a_v5 = _mm256_sub_ps(a_v5, b_v5);
+					a_v6 = _mm256_sub_ps(a_v6, b_v6);
+					a_v7 = _mm256_sub_ps(a_v7, b_v7);
+
+					a_v0 = _mm256_mul_ps(a_v0, a_v0);
+					a_v1 = _mm256_mul_ps(a_v1, a_v1);
+					a_v2 = _mm256_mul_ps(a_v2, a_v2);
+					a_v3 = _mm256_mul_ps(a_v3, a_v3);
+					a_v4 = _mm256_mul_ps(a_v4, a_v4);
+					a_v5 = _mm256_mul_ps(a_v5, a_v5);
+					a_v6 = _mm256_mul_ps(a_v6, a_v6);
+					a_v7 = _mm256_mul_ps(a_v7, a_v7);
+
+					a_v0 = _mm256_add_ps(a_v0, a_v1);
+					a_v0 = _mm256_add_ps(a_v0, a_v2);
+					a_v0 = _mm256_add_ps(a_v0, a_v3);
+					a_v0 = _mm256_add_ps(a_v0, a_v4);
+					a_v0 = _mm256_add_ps(a_v0, a_v5);
+					a_v0 = _mm256_add_ps(a_v0, a_v6);
+					a_v0 = _mm256_add_ps(a_v0, a_v7);
+
+					_mm256_storeu_ps(res, a_v0);
+
+					for (k = 0; k < 8; k++)
+						dist += res[k];
+				}
 #else /* AVX */
 				float temp;
 				dist = 0;
