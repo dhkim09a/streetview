@@ -9,7 +9,7 @@ CCBIN = g++-4.9
 CC = nvcc -ccbin $(CCBIN)
 
 CUFLAGS = -O0 --use_fast_math -lineinfo --maxrregcount=$(REG) -D_FORCE_INLINES
-CFLAGS = -O2 -Wall -I../openSURF/src -I../dbmaker -g \
+CFLAGS = -O2 -Wall -I../openSURF/src -g \
 		 $(shell pkg-config --cflags opencv)
 CFLAGS += -Wno-unused-function
 LDFLAGS = $(shell pkg-config --libs opencv) \

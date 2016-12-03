@@ -49,15 +49,14 @@ __global__ void doSearchKernel (int shared_mem_size, int needle_idx,
 		needle_local.vec[i] = needle[threadIdx.x + needle_idx].vec[i];
 
 	struct _interim interim_temp;
-	if (interim_local->lat_first == 0) {
+	if (interim_local->tag.str[0] == '\0') {
 		interim_temp.dist_first = FLT_MAX;
 		interim_temp.dist_second = FLT_MAX;
 	}
 	else {
 		interim_temp.dist_first = interim_local->dist_first;
 		interim_temp.dist_second = interim_local->dist_second;
-		interim_temp.lat_first = interim_local->lat_first;
-		interim_temp.lng_first = interim_local->lng_first;
+		interim_temp.tag = interim_local->tag;
 	}
 
 	extern __shared__ ipoint_t haystack_shared[];
@@ -142,10 +141,8 @@ __global__ void doSearchKernel (int shared_mem_size, int needle_idx,
 #endif
 			}
 			if (dist < interim_temp.dist_first) {
-				interim_temp.lat_first =
-					haystack_shared[i].latitude;
-				interim_temp.lng_first =
-					haystack_shared[i].longitude;
+				interim_temp.tag =
+					haystack_shared[i].tag;
 				interim_temp.dist_second =
 					interim_temp.dist_first;
 				interim_temp.dist_first = dist;
@@ -155,15 +152,14 @@ __global__ void doSearchKernel (int shared_mem_size, int needle_idx,
 		}
 	}
 
-	interim_local->lat_first = interim_temp.lat_first;
-	interim_local->lng_first = interim_temp.lng_first;
+	interim_local->tag = interim_temp.tag;
 	interim_local->dist_first = interim_temp.dist_first;
 	interim_local->dist_second = interim_temp.dist_second;
 
 	return;
 }
 
-static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
+static int doSearch (ipoint_t *needle, int needle_size, ipoint_t *haystack, int haystack_size,
 		struct _interim *result, int result_size)
 {
 	cudaSetDevice(DEV_ID);
@@ -184,7 +180,7 @@ static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 	ipoint_essence_t *needle_essence_h, *needle_essence_d;
 	ipoint_t *haystack_d;
 	struct _interim *interim_h, *interim_d;
-	int needle_size = (*needle).size();
+	//int needle_size = (*needle).size();
 	cudaError_t err;
 
 	PROFILE_FROM(init_device);
@@ -208,11 +204,13 @@ static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 	for (i = 0; i < (int)stream_dim; i++)
 		cudaStreamCreate(&stream[i]);
 
+#if 1
 	needle_essence_h = (ipoint_essence_t *)malloc(
 			needle_size * sizeof(ipoint_essence_t));
 	for (i = 0; i < needle_size; i++)
 		for (j = 0; j < VEC_DIM; j++)
-			needle_essence_h[i].vec[j] = (*needle)[i].descriptor[j];
+			needle_essence_h[i].vec[j] = needle[i].vec[j];
+#endif
 
 	PROFILE_FROM(copy_needle);
 	/* Copy needle to device */
@@ -321,14 +319,12 @@ static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 	PROFILE_TO(copy_result);
 
 	PROFILE_FROM(post_processing);
-	iter = MIN((int)(*needle).size(), result_size);
+	iter = MIN(needle_size, result_size);
 	for (i = 0; i < iter; i++) {
 		for (j = 0; j < (int)(grid_dim * stream_dim); j++) {
 			if (result[i].dist_first == FLT_MAX) {
-				result[i].lat_first =
-					interim_h[(j * needle_size) + i].lat_first;
-				result[i].lng_first =
-					interim_h[(j * needle_size) + i].lng_first;
+				result[i].tag =
+					interim_h[(j * needle_size) + i].tag;
 				result[i].dist_first =
 					interim_h[(j * needle_size) + i].dist_first;
 				result[i].dist_second =
@@ -338,10 +334,8 @@ static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 
 			dist = interim_h[(j * needle_size) + i].dist_first;
 			if (dist < result[i].dist_first) {
-				result[i].lat_first =
-					interim_h[(j * needle_size) + i].lat_first;
-				result[i].lng_first =
-					interim_h[(j * needle_size) + i].lng_first;
+				result[i].tag =
+					interim_h[(j * needle_size) + i].tag;
 				result[i].dist_second = result[i].dist_first;
 				result[i].dist_first = dist;
 			}
@@ -350,10 +344,8 @@ static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 
 			dist = interim_h[(j * needle_size) + i].dist_second;
 			if (dist < result[i].dist_first) {
-				result[i].lat_first =
-					interim_h[(j * needle_size) + i].lat_first;
-				result[i].lng_first =
-					interim_h[(j * needle_size) + i].lng_first;
+				result[i].tag =
+					interim_h[(j * needle_size) + i].tag;
 				result[i].dist_second = result[i].dist_first;
 				result[i].dist_first = dist;
 			}
@@ -388,8 +380,8 @@ void *search_gpu_main(void *arg)
 		msg_read(&me->msgbox, &msg);
 		task_t *task = (task_t *)msg.content;
 
-		doSearch(&task->needle, task->haystack, task->haystack_size,
-				task->result, (task->needle).size());
+		doSearch(task->needle, task->needle_size, task->haystack, task->haystack_size,
+				task->result, task->needle_size);
 
 		me->isbusy = false;
 		db_release(me->db,

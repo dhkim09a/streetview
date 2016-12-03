@@ -16,6 +16,8 @@
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 */
+
+#if 0
 typedef struct _arg_t {
 	IpVec *needle;
 	ipoint_t *haystack;
@@ -27,15 +29,16 @@ typedef struct _arg_t {
 	pthread_mutex_t *mx_running;
 	pthread_cond_t *wakeup_master;
 } arg_t;
+#endif
 
-static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
+static int doSearch (ipoint_t *needle, int needle_size, ipoint_t *haystack, int haystack_size,
 		struct _interim *interim, int interim_size)
 {
 	float dist;
 	int i, j, k, l;
 	int iter;
 
-	iter = MIN(interim_size, (int)(*needle).size());
+	iter = MIN(interim_size, needle_size);
 	int batch = MIN(100, iter);
 	for (l = 0; l <= (iter / batch); l++) {
 		for (j = 0; j < haystack_size; j++) {
@@ -96,14 +99,13 @@ static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 				float temp;
 				dist = 0;
 				for (k = 0; k < VEC_DIM; k++) {
-					temp = (*needle)[i].descriptor[k] - haystack[j].vec[k];
+					temp = needle[i].vec[k] - haystack[j].vec[k];
 					dist += temp * temp;
 				}
 #endif /* AVX */
 
 				if (dist < interim[i].dist_first) {
-					interim[i].lat_first = haystack[j].latitude;
-					interim[i].lng_first = haystack[j].longitude;
+					interim[i].tag = haystack[j].tag;
 					interim[i].dist_second = interim[i].dist_first;
 					interim[i].dist_first = dist;
 				}
@@ -128,8 +130,8 @@ void *search_cpu_main(void *arg)
 		msg_read(&me->msgbox, &msg);
 		task_t *task = (task_t *)msg.content;
 
-		doSearch(&task->needle, task->haystack, task->haystack_size,
-				task->result, (task->needle).size());
+		doSearch(task->needle, task->needle_size, task->haystack, task->haystack_size,
+				task->result, task->needle_size);
 
 		me->isbusy = false;
 		db_release(me->db,

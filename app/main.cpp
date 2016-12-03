@@ -40,12 +40,17 @@ void callback (msg_t *msg)
 	req_t *request = (req_t *)msg->content;
 	cb_arg_t *arg = (cb_arg_t *)msg->arg;
 
+#if 0
 	printf("latitude   longitude  score\n");
-	printf(FPF_T" "FPF_T" %.3f\n",
+	printf("%f %f %.3f\n",
 			request->latitude, request->longitude, request->score);
+#else
+	printf("%s %.3f\n", request->tag.str, request->score);
+#endif
 	fflush(stdout);
 
-	cvReleaseImage(&request->img);
+	//cvReleaseImage(&request->img);
+	free(request->vec);
 
 	pthread_cond_signal(&arg->cd_block);
 }
@@ -116,6 +121,7 @@ int main (int argc, char **argv)
 				continue;
 		}
 
+#if 0
 		/* load input image */
 		if (!(input_img = cvLoadImage(img_path))) {
 			fprintf(stderr, "Failed to load image, %s\n", img_path);
@@ -134,12 +140,33 @@ int main (int argc, char **argv)
 			cvReleaseImage(&input_img);
 			input_img = resized_img;
 		}
+#endif
+		/* Load the input vector */
+		int fd;
+		if ((fd = open(img_path, O_RDONLY)) < 0) {
+			fprintf(stderr, "%s not found", img_path);
+			return 0;
+		}
 
-		request.img = input_img;
+		ipoint_t *invec;
+		if (!(invec = (ipoint_t *)malloc(sizeof(ipoint_t)))) {
+			perror("malloc");
+			return 0;
+		}
+
+		if (read(fd, invec, sizeof(ipoint_t)) <= 0) {
+			fprintf(stderr, "Unexpected corner case\n");
+			return 0;
+		}
+
+		request.vec = invec;
+		request.vec_size = 1;
+		//request.img = input_img;
 		if (msg_write(&sc.msgbox,
 					(void *)&request, callback, (void *)&cb_arg)) {
 			printf("Request failed: %s\n", img_path);
-			cvReleaseImage(&input_img);
+			//cvReleaseImage(&input_img);
+			free(invec);
 		}
 
 		pthread_mutex_lock(&cb_arg.mx_block);

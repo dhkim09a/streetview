@@ -201,15 +201,15 @@ callback (msg_t *msg)
 	req_t *request = (req_t *)msg->content;
 	cb_arg_t *arg = (cb_arg_t *)msg->arg;
 
-	arg->latitude = request->latitude;
-	arg->longitude = request->longitude;
+	arg->latitude = request->tag.geo.latitude;
+	arg->longitude = request->tag.geo.longitude;
 	arg->score = request->score;
 #if 0
 	printf("latitude   longitude  score\n");
 	printf(FPF_T" "FPF_T" %.3f\n", latitude, longitude, score);
 	fflush(stdout);
 #endif
-	cvReleaseImage(&(request->img));
+	//cvReleaseImage(&(request->img));
 
 	FD_SET(arg->sock, arg->wfds);
 	while(write(arg->pipe_wkup, "dummy", 1) < 0);
@@ -395,7 +395,9 @@ void *net_main (void *arg)
 					cb_arg[i].wfds = &wfds;
 					cb_arg[i].pipe_wkup = pipe_select[1];
 
+#if 0
 					request[idx].img = img;
+#endif
 					if (msg_write(&sc->msgbox, (void *)&request,
 								callback, (void *)&cb_arg[i])) {
 						CLOSE(i);

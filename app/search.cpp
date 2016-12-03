@@ -95,8 +95,7 @@ void merge_result(struct _interim *resultA, struct _interim *resultB, int size)
 
 	for (i = 0; i < size; i++) {
 		if (resultA[i].dist_first == FLT_MAX) {
-			resultA[i].lat_first = resultB[i].lat_first;
-			resultA[i].lng_first = resultB[i].lng_first;
+			resultA[i].tag = resultB[i].tag;
 			resultA[i].dist_first = resultB[i].dist_first;
 			resultA[i].dist_second = resultB[i].dist_second;
 			continue;
@@ -104,8 +103,7 @@ void merge_result(struct _interim *resultA, struct _interim *resultB, int size)
 
 		dist = resultB[i].dist_first;
 		if (dist < resultA[i].dist_first) {
-			resultA[i].lat_first = resultB[i].lat_first;
-			resultA[i].lng_first = resultB[i].lng_first;
+			resultA[i].tag = resultB[i].tag;
 			resultA[i].dist_second = resultA[i].dist_first;
 			resultA[i].dist_first = dist;
 		}
@@ -114,8 +112,7 @@ void merge_result(struct _interim *resultA, struct _interim *resultB, int size)
 
 		dist = resultB[i].dist_second;
 		if (dist < resultA[i].dist_first) {
-			resultA[i].lat_first = resultB[i].lat_first;
-			resultA[i].lng_first = resultB[i].lng_first;
+			resultA[i].tag = resultB[i].tag;
 			resultA[i].dist_second = resultA[i].dist_first;
 			resultA[i].dist_first = dist;
 		}
@@ -132,7 +129,9 @@ void *sc_main(void *arg)
 	db_t *db = sc->db;
 	msg_t msg;
 	req_t *request;
-	IpVec needle;
+	//IpVec needle;
+	ipoint_t *needle;
+	int needle_size;
 
 	result_t answer;
 	ResVec answer_vec;
@@ -172,21 +171,25 @@ void *sc_main(void *arg)
 
 		request = (req_t *)msg.content;
 
-		if (!request->img)
+		if (!request->vec)
 			continue;
 
-		surfDetDes(request->img, needle, false, 3, 4, 3, SURF_THRESHOLD);
+#if 0
+		//surfDetDes(request->img, needle, false, 3, 4, 3, SURF_THRESHOLD);
 
 		while (needle.size() > MAX_IPTS)
 			needle.pop_back();
+#endif
+
+		needle = request->vec;
+		needle_size = request->vec_size;
 
 		for (i = 0; i < NUM_WORKER; i++)
-			for (j = 0; j < (int)needle.size(); j++) {
+			for (j = 0; j < needle_size; j++) {
 				struct _interim *result = &(tasks[i].result[j]);
 				result->dist_first = FLT_MAX;
 				result->dist_second = FLT_MAX;
-				result->lat_first = 0;
-				result->lng_first = 0;
+				result->tag.str[0] = '\0';
 			}
 
 		PROFILE_FROM(search);
@@ -240,6 +243,7 @@ void *sc_main(void *arg)
 			}
 			tasks[worker].haystack_size = haystack_mem_size / sizeof(ipoint_t);
 			tasks[worker].needle = needle;
+			tasks[worker].needle_size = needle_size;
 
 			workers[worker].isbusy = true;
 			msg_write(&(workers[worker].msgbox), &tasks[worker], NULL, NULL);
@@ -253,18 +257,17 @@ void *sc_main(void *arg)
 		/* merge results from workers */
 		for (i = 1; i < NUM_WORKER; i++)
 			merge_result(tasks[0].result,
-					tasks[i].result, needle.size());
+					tasks[i].result, needle_size);
 
 		struct _interim *merged_result = tasks[0].result;
 
-		for (i = 0; i < (int)needle.size(); i++) {
+		for (i = 0; i < needle_size; i++) {
 			dist_ratio = merged_result[i].dist_first
 				/ merged_result[i].dist_second;
 			if (dist_ratio < MATCH_THRESH_SQUARE){
 				found = -1;
 				for (j = 0; j < (int)answer_vec.size(); j++) {
-					if (answer_vec[j].latitude == merged_result[i].lat_first
-							&& answer_vec[j].longitude == merged_result[i].lng_first) {
+					if (strncmp(answer_vec[j].tag.str, merged_result[i].tag.str, TAGLEN) == 0){
 						answer_vec[j].score += 1 - dist_ratio;
 						found = 1;
 						break;
@@ -272,8 +275,7 @@ void *sc_main(void *arg)
 				}
 
 				if (found < 0) {
-					answer.latitude = merged_result[i].lat_first;
-					answer.longitude = merged_result[i].lng_first;
+					answer.tag = merged_result[i].tag;
 					answer.score = 1 - dist_ratio;
 
 					answer_vec.push_back(answer);
@@ -284,13 +286,14 @@ void *sc_main(void *arg)
 		for (i = 0; i < (int)answer_vec.size(); i++) {
 			sum += answer_vec[i].score;
 		}
+#if 0
 		for (i = 0; i < (int)answer_vec.size(); i++)
 			answer_vec[i].score *= 100 / sum;
+#endif
 		std::sort(answer_vec.begin(), answer_vec.end(), comp_result);
 
 		if (answer_vec.size() > 0) {
-			request->latitude = answer_vec[0].latitude;
-			request->longitude = answer_vec[0].longitude;
+			request->tag = answer_vec[0].tag;
 			request->score = answer_vec[0].score;
 		}
 
@@ -300,7 +303,7 @@ void *sc_main(void *arg)
 			msg.cb(&msg);
 
 		/* XXX: Is this sufficient to free all the memory? */
-		needle.clear();
+		//needle.clear();
 		answer_vec.clear();
 	}
 

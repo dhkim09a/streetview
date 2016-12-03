@@ -15,8 +15,7 @@
 #define MATCH_THRESH_SQUARE (MATCH_THRESH * MATCH_THRESH)
 
 typedef struct _result_t {
-	FPF latitude;
-	FPF longitude;
+	union _tag tag;
 	float score;
 } result_t;
 
@@ -29,17 +28,17 @@ static bool comp_result (result_t i, result_t j)
 }
 
 struct _interim {
-	FPF lat_first __attribute__((aligned (4)));
-	FPF lng_first __attribute__((aligned (4)));
+	union _tag tag;
 	float dist_first __attribute__((aligned (4)));
 	float dist_second __attribute__((aligned (4)));
 } __attribute__((packed));
 
 typedef struct _req_t {
-	IplImage *img;
-	FPF latitude;
-	FPF longitude;
-	FPF score;
+	ipoint_t *vec;
+	int vec_size;
+	//IplImage *img;
+	union _tag tag;
+	float score;
 } req_t;
 
 typedef struct _search_t {
@@ -50,7 +49,8 @@ typedef struct _search_t {
 typedef struct _task_t {
 	ipoint_t *haystack;
 	int haystack_size;
-	IpVec needle;
+	ipoint_t *needle;
+	int needle_size;
 	struct _interim *result;
 } task_t;
 
