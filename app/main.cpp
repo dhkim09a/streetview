@@ -55,6 +55,17 @@ void callback (msg_t *msg)
 	pthread_cond_signal(&arg->cd_block);
 }
 
+ssize_t
+getfilesize(int fd)
+{
+	struct stat status;
+
+	if (fstat(fd, &status))
+		return -1;
+
+	return status.st_size;
+}
+
 int main (int argc, char **argv)
 {
 	if (argc != 2 && argc != 3) {
@@ -142,25 +153,34 @@ int main (int argc, char **argv)
 		}
 #endif
 		/* Load the input vector */
+
 		int fd;
+		ssize_t size, max_size = sizeof(ipoint_t) * 1000;
+		void *invec;
+
 		if ((fd = open(img_path, O_RDONLY)) < 0) {
 			fprintf(stderr, "%s not found", img_path);
-			return 0;
+			return -1;
 		}
 
-		ipoint_t *invec;
-		if (!(invec = (ipoint_t *)malloc(sizeof(ipoint_t)))) {
+		if ((size = getfilesize(fd)) < 0)
+			return -1;
+
+		if (size > max_size)
+			size = max_size;
+
+		if (!(invec = malloc(size))) {
 			perror("malloc");
-			return 0;
+			return -1;
 		}
 
-		if (read(fd, invec, sizeof(ipoint_t)) <= 0) {
+		if (read(fd, invec, size) <= 0) {
 			fprintf(stderr, "Unexpected corner case\n");
-			return 0;
+			return -1;
 		}
 
-		request.vec = invec;
-		request.vec_size = 1;
+		request.vec = (ipoint_t *)invec;
+		request.vec_size = size / sizeof(ipoint_t);
 		//request.img = input_img;
 		if (msg_write(&sc.msgbox,
 					(void *)&request, callback, (void *)&cb_arg)) {
