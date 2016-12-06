@@ -38,7 +38,7 @@ read_line(int fd, char *buf, int len)
 	while (i < len - 1) {
 		if (read(fd, &buf[i], 1) < 1)
 			return -1;
-		if (buf[i] == '\n') {
+		if (buf[i] == '\n' || buf[i] == '\r') {
 			buf[i] = '\0';
 			return i + 1;
 		}
@@ -125,6 +125,9 @@ main (int argc, char **argv)
 	}
 
 	while ((r = read_line(infd, inbuf, inbuflen)) > 0) {
+		if (r == 1) /* skip empty lines */
+			continue;
+
 		r = csve2dbe(&conf, outbuf, outbuflen, inbuf, r);
 		assert(r > 0);
 
