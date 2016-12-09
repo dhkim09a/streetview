@@ -5,7 +5,7 @@ CC = gcc
 
 PWD = `pwd`
 
-CFLAGS = -O0 -g -ggdb -Wall
+CFLAGS = -O3 -g -ggdb -Wall
 
 OBJS = main.o
 

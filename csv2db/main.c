@@ -74,14 +74,28 @@ csve2dbe(struct conf *conf, void *buf, int len, char *str, int strlen)
 }
 
 int
+dbe_add(struct conf *conf, void *dest, void *src)
+{
+	int i;
+	float *dv, *sv;
+	dv = (float *)&((char *)dest)[conf->metalen];
+	sv = (float *)&((char *)src)[conf->metalen];
+
+	for (i = 0; i < conf->vecdim; i++)
+		dv[i] = dv[i] + sv[i];
+
+	return 0;
+}
+
+int
 main (int argc, char **argv)
 {
 	unsigned char opt;
-	char *infile = NULL, outfile[FILENAMELEN_MAX + 1] = {0};
-	int infd = -1, outfd = -1;
-	char *inbuf = NULL, *outbuf = NULL;
-	int inbuflen = STRLEN_MAX, outbuflen = 0;
-	int r;
+	char *infile[10] = {NULL}, outfile[FILENAMELEN_MAX + 1] = {0};
+	int infd[10] = {0}, outfd = -1, incnt = 0;
+	char *inbuf[10] = {NULL}, *outbuf = NULL, *tmpbuf = NULL;
+	int inbuflen = STRLEN_MAX, outbuflen = 0, outlen = -1;
+	int r, i;
 	struct conf conf = {
 		.metalen = METALEN_DEFAULT,
 		.vecdim = 0,
@@ -94,7 +108,7 @@ main (int argc, char **argv)
 				break;
 
 			case 'f':
-				infile = optarg;
+				infile[incnt++] = optarg;
 				break;
 
 			default:
@@ -103,19 +117,21 @@ main (int argc, char **argv)
 		}
 	}
 
-	if (!infile) {
+	if (incnt <= 0) {
 		print_help();
 		return 0;
 	}
 
-	if ((infd = open(infile, O_RDONLY)) < 0) {
-		fprintf(stderr, "%s not found", infile);
-		return 0;
-	}
+	for (i = 0; i < incnt; i++) {
+		if ((infd[i] = open(infile[i], O_RDONLY)) < 0) {
+			fprintf(stderr, "%s not found", infile[i]);
+			return 0;
+		}
 
-	if (!(inbuf = (char *)malloc(inbuflen))) {
-		perror("malloc");
-		return 0;
+		if (!(inbuf[i] = (char *)malloc(inbuflen))) {
+			perror("malloc");
+			return 0;
+		}
 	}
 
 	outbuflen = conf.metalen + sizeof(float) * VECDIM_MAX;
@@ -124,16 +140,58 @@ main (int argc, char **argv)
 		return 0;
 	}
 
-	while ((r = read_line(infd, inbuf, inbuflen)) > 0) {
-		if (r == 1) /* skip empty lines */
-			continue;
+	if (!(tmpbuf = (char *)malloc(outbuflen))) {
+		perror("malloc");
+		return 0;
+	}
 
-		r = csve2dbe(&conf, outbuf, outbuflen, inbuf, r);
-		assert(r > 0);
+	while (1) {
+		for (i = 0; i < incnt; i++) {
+			/* read a line while skipping empty lines */
+			while ((r = read_line(infd[i], inbuf[i], inbuflen)) == 1);
+			if (r <= 0) {
+				/* one of any input files end */
+				for (i = 0; i < incnt; i++)
+					close(infd[i]);
+				close(outfd);
+				return 0;
+			}
+
+			if (i == 0) {
+				r = csve2dbe(&conf, outbuf, outbuflen, inbuf[i], r);
+				assert(r > 0);
+
+				if (outlen < 0)
+					outlen = r;
+				else if (r != outlen) {
+					fprintf(stderr, "input dimension mismatch!\n");
+					return 0;
+				}
+
+			} else {
+				r = csve2dbe(&conf, tmpbuf, outbuflen, inbuf[i], r);
+				assert(r > 0);
+
+				if (outlen < 0)
+					outlen = r;
+				else if (r != outlen) {
+					fprintf(stderr, "input dimension mismatch!\n");
+					return 0;
+				}
+
+				if (strncmp((char *)outbuf, (char *)tmpbuf, conf.metalen)) {
+					fprintf(stderr, "vector name mismatch! ('%s' != '%s')\n",
+							outbuf, tmpbuf);
+					return -1;
+				}
+				dbe_add(&conf, outbuf, tmpbuf);
+			}
+		}
 
 		if (!*outfile) {
 			snprintf(outfile, FILENAMELEN_MAX,
-					"%d_%d_%s.db", conf.vecdim, conf.metalen, basename(infile));
+					"%d_%d_%s%s.db", conf.vecdim, conf.metalen, basename(infile[0]),
+					(incnt > 1) ? "(avg_pooling)" : "");
 			printf("outfile: %s\n", outfile);
 		}
 
@@ -142,14 +200,11 @@ main (int argc, char **argv)
 			return 0;
 		}
 
-		if (r != write(outfd, outbuf, r)) {
+		if (outlen != write(outfd, outbuf, outlen)) {
 			fprintf(stderr, "Writing failure\n");
 			return 0;
 		}
 	}
-
-	close(infd);
-	close(outfd);
 
 	return 0;
 }
