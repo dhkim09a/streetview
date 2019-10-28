@@ -56,11 +56,16 @@ typedef struct _task_t {
 
 typedef struct _worker {
 	bool dead;
+	bool ready;
 
 	pthread_t tid;
 	msgbox_t msgbox;
 	bool isbusy;
 	size_t chunk_size;
+	int did; // GPU device ID for GPU workers
+
+	int stat_called;
+	size_t stat_bytes;
 
 	db_t *db;
 	pthread_cond_t *cd_wait_worker;

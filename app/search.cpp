@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 #include <float.h>
 #include <pthread.h>
@@ -44,7 +45,7 @@
 #endif
 
 #define NUM_WORKER (NUMCPU + NUMGPU)
-#define MAX_IPTS 2000
+#define MAX_IPTS 20000
 
 extern void *search_cpu_main(void *arg);
 extern void *search_gpu_main(void *arg);
@@ -66,23 +67,39 @@ static int init_worker_pool(worker_t *workers,
 {
 	int i;
 
-	for (i = 0; i < num_cpu_threads; i++) {
+	// Worker 0 is the most preferred because the worker pool is always searched from 0.
+	for (i = 0; i < num_gpu_threads; i++) {
 		msg_init_box(&workers[i].msgbox);
 		workers[i].dead = false;
+		workers[i].ready = false;
+		workers[i].isbusy = false;
+		workers[i].chunk_size = gpu_chunk_size;
+		workers[i].did = i;
+		workers[i].db = db;
+		workers[i].cd_wait_worker = cd_wait_worker;
+		workers[i].stat_called = 0;
+		workers[i].stat_bytes = 0;
+		pthread_create(&workers[i].tid, NULL, gpu_thread_main, &workers[i]);
+	}
+	for (i = num_gpu_threads; i < num_gpu_threads + num_cpu_threads; i++) {
+		msg_init_box(&workers[i].msgbox);
+		workers[i].dead = false;
+		workers[i].ready = false;
 		workers[i].isbusy = false;
 		workers[i].chunk_size = cpu_chunk_size;
 		workers[i].db = db;
 		workers[i].cd_wait_worker = cd_wait_worker;
+		workers[i].stat_called = 0;
+		workers[i].stat_bytes = 0;
 		pthread_create(&workers[i].tid, NULL, cpu_thread_main, &workers[i]);
 	}
-	for (i = num_cpu_threads; i < num_cpu_threads + num_gpu_threads; i++) {
-		msg_init_box(&workers[i].msgbox);
-		workers[i].dead = false;
-		workers[i].isbusy = false;
-		workers[i].chunk_size = gpu_chunk_size;
-		workers[i].db = db;
-		workers[i].cd_wait_worker = cd_wait_worker;
-		pthread_create(&workers[i].tid, NULL, gpu_thread_main, &workers[i]);
+
+	// Wait for GPU threads to be bound to GPUs. The program
+	// works even without this line, but profile result might
+	// be wrong.
+	for (i = 0; i < num_cpu_threads + num_gpu_threads; i++) {
+		while (workers[i].ready == false)
+			usleep(1000);
 	}
 
 	return 0;
@@ -162,6 +179,7 @@ void *sc_main(void *arg)
 	while (1) {
 		PROFILE_INIT();
 		PROFILE_VAR(search);
+		PROFILE_VAR(tail);
 
 		msg_read(&sc->msgbox, &msg);
 
@@ -176,6 +194,8 @@ void *sc_main(void *arg)
 			continue;
 
 		surfDetDes(request->img, needle, false, 3, 4, 3, SURF_THRESHOLD);
+
+		printf("needle: %d ipts (max: %d)\n", needle.size(), MAX_IPTS);
 
 		while (needle.size() > MAX_IPTS)
 			needle.pop_back();
@@ -218,10 +238,12 @@ void *sc_main(void *arg)
 				if (i == NUM_WORKER)
 					break;
 				else {
+					PROFILE_FROM(tail);
 					/* Wait until any worker finishes */
 					pthread_mutex_lock(&mx_wait_worker);
 					pthread_cond_wait(&cd_wait_worker, &mx_wait_worker);
 					pthread_mutex_unlock(&mx_wait_worker);
+					PROFILE_TO(tail);
 					continue;
 				}
 			}
@@ -302,6 +324,16 @@ void *sc_main(void *arg)
 		/* XXX: Is this sufficient to free all the memory? */
 		needle.clear();
 		answer_vec.clear();
+
+		for (i = 0; i < NUMCPU + NUMGPU; i++) {
+			printf("%s%d: %d times called, %lu bytes processed\n",
+					(i < NUMGPU) ? "GPU" : "CPU",
+					(i < NUMGPU) ? i : i - NUMGPU,
+					workers[i].stat_called,
+					workers[i].stat_bytes);
+			workers[i].stat_called = 0;
+			workers[i].stat_bytes = 0;
+		}
 	}
 
 	return NULL;

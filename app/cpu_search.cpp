@@ -121,6 +121,8 @@ void *search_cpu_main(void *arg)
 	worker_t *me = (worker_t *)arg;
 	msg_t msg;
 
+	me->ready = true;
+
 	while (1) {
 		if (me->dead)
 			break;
@@ -135,6 +137,9 @@ void *search_cpu_main(void *arg)
 		db_release(me->db,
 				task->haystack, task->haystack_size * sizeof(ipoint_t));
 		pthread_cond_signal(me->cd_wait_worker);
+
+		me->stat_called++;
+		me->stat_bytes += task->haystack_size;
 	}
 
 	return NULL;

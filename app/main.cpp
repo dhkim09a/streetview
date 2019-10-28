@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 #include <float.h>
 #include <pthread.h>
@@ -109,11 +110,18 @@ int main (int argc, char **argv)
 			printf("> ");
 			fflush(stdout);
 
-			if (!gets(img_path))
+			if (!fgets(img_path, MAX_IMG_PATH_LEN, stdin))
 				continue;
 			if (img_path[0] == '\0')
 				continue;
+
+			// remove the trailing '\n'
+			int pathlen = strlen(img_path);
+			img_path[pathlen - 1] = '\0';
 		}
+
+		int i;
+		for (i = 0; i < 10; i++) {
 
 		/* load input image */
 		if (!(input_img = cvLoadImage(img_path))) {
@@ -144,6 +152,8 @@ int main (int argc, char **argv)
 		pthread_mutex_lock(&cb_arg.mx_block);
 		pthread_cond_wait(&cb_arg.cd_block, &cb_arg.mx_block);
 		pthread_mutex_unlock(&cb_arg.mx_block);
+
+		}
 
 		if (argc == 3)
 			break;

@@ -16,9 +16,6 @@
 #endif
 #include "profile.h"
 
-/* Use device 0 */
-#define DEV_ID 0
-
 typedef struct _ipoint_essence_t {
 	float vec[VEC_DIM] __attribute__((aligned (4)));
 } __attribute__((packed)) ipoint_essence_t;
@@ -163,15 +160,16 @@ __global__ void doSearchKernel (int shared_mem_size, int needle_idx,
 	return;
 }
 
-static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
+static int doSearch (int dev_id, IpVec *needle, ipoint_t *haystack, int haystack_size,
 		struct _interim *result, int result_size)
 {
-	cudaSetDevice(DEV_ID);
-	cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
+	// cudaSetDevice(dev_id);
+	// cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
 
 	PROFILE_INIT();
 	PROFILE_START();
 	PROFILE_VAR(init_device);
+	PROFILE_VAR(init_ds);
 	PROFILE_VAR(copy_needle);
 	PROFILE_VAR(copy_haystack);
 	PROFILE_VAR(run_kernel);
@@ -192,9 +190,9 @@ static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 	cudaDeviceSynchronize();
 #endif
 	PROFILE_TO(init_device);
-
+	PROFILE_FROM(init_ds);
 	cudaDeviceProp device_prop;
-	cudaGetDeviceProperties(&device_prop, DEV_ID);
+	cudaGetDeviceProperties(&device_prop, dev_id);
 
 	cudaStream_t *stream;
 
@@ -214,6 +212,7 @@ static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 		for (j = 0; j < VEC_DIM; j++)
 			needle_essence_h[i].vec[j] = (*needle)[i].descriptor[j];
 
+	PROFILE_TO(init_ds);
 	PROFILE_FROM(copy_needle);
 	/* Copy needle to device */
 	if (cudaMalloc((void **)&needle_essence_d,
@@ -240,6 +239,23 @@ static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 		fprintf(stderr, "cudaMalloc(haystack_d) failed\n");
 		return -1;
 	}
+
+	int stream_haystack_quota = haystack_size / stream_dim;
+	int stream_haystack_size;
+	for (j = 0; j < (int)stream_dim; j++) {
+		stream_haystack_size
+			= (j + 1) * stream_haystack_quota > haystack_size ?
+			(haystack_size % stream_haystack_quota) : stream_haystack_quota;
+
+		if (cudaMemcpyAsync(
+					(ipoint_t *)(&haystack_d[stream_haystack_quota * j]),
+					(ipoint_t *)(&haystack[stream_haystack_quota * j]),
+					stream_haystack_size * sizeof(ipoint_t),
+					cudaMemcpyHostToDevice, stream[j]) != cudaSuccess) {
+			fprintf(stderr, "cudaMemcpy(haystack_d, haystack) failed\n");
+			return -1;
+		}
+	}
 #ifdef PROFILE_CUDA
 	cudaDeviceSynchronize();
 #endif
@@ -261,22 +277,6 @@ static int doSearch (IpVec *needle, ipoint_t *haystack, int haystack_size,
 	interim_h = (struct _interim *)malloc(
 			grid_dim * stream_dim * sizeof(struct _interim) * needle_size);
 
-	int stream_haystack_quota = haystack_size / stream_dim;
-	int stream_haystack_size;
-	for (j = 0; j < (int)stream_dim; j++) {
-		stream_haystack_size
-			= (j + 1) * stream_haystack_quota > haystack_size ?
-			(haystack_size % stream_haystack_quota) : stream_haystack_quota;
-
-		if (cudaMemcpyAsync(
-					(ipoint_t *)(&haystack_d[stream_haystack_quota * j]),
-					(ipoint_t *)(&haystack[stream_haystack_quota * j]),
-					stream_haystack_size * sizeof(ipoint_t),
-					cudaMemcpyHostToDevice, stream[j]) != cudaSuccess) {
-			fprintf(stderr, "cudaMemcpy(haystack_d, haystack) failed\n");
-			return -1;
-		}
-	}
 	for (i = 0; i <= needle_size / block_dim; i++) {
 
 		PROFILE_FROM(run_kernel);
@@ -381,6 +381,12 @@ void *search_gpu_main(void *arg)
 	worker_t *me = (worker_t *)arg;
 	msg_t msg;
 
+	cudaSetDevice(me->did);
+	cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
+	cudaDeviceSynchronize();
+
+	me->ready = true;
+
 	while (1) {
 		if (me->dead)
 			break;
@@ -388,13 +394,16 @@ void *search_gpu_main(void *arg)
 		msg_read(&me->msgbox, &msg);
 		task_t *task = (task_t *)msg.content;
 
-		doSearch(&task->needle, task->haystack, task->haystack_size,
+		doSearch(me->did, &task->needle, task->haystack, task->haystack_size,
 				task->result, (task->needle).size());
 
 		me->isbusy = false;
 		db_release(me->db,
 				task->haystack, task->haystack_size * sizeof(ipoint_t));
 		pthread_cond_signal(me->cd_wait_worker);
+
+		me->stat_called++;
+		me->stat_bytes += task->haystack_size;
 	}
 
 	return NULL;

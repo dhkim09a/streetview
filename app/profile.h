@@ -79,10 +79,10 @@ do { int i; \
 	fprintf(fp, "[PROFILE %s]\n", __func__); \
 	for (i = 0; i < PROFILE_MAX_VAR; i++) \
 		if (__var_list[i] != NULL) { \
-			printf("                              : %11.3lf ms (%5.2lf %%)", \
+			printf("%-30s: %11.3lf ms (%5.2lf %%)\n", \
+					__name_list[i], \
 					(double)*__var_list[i] / 1000.0, \
 					100 * (double)*__var_list[i] / (double)__c_total_us); \
-			printf("\r%s\n", __name_list[i]); \
 		} \
 	fprintf(fp, "etc. (includes the overhead)  : %11.3lf ms (%5.2lf %%)\n", \
 			(double)__c_etc_us / 1000.0, \
